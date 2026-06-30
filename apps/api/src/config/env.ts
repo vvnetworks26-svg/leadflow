@@ -16,7 +16,7 @@ import path from 'path';
 // Load .env relative to the api package root
 dotenv.config({ path: path.resolve(__dirname, '../../.env') });
 
-function require(key: string): string {
+function requireEnv(key: string): string {
   const val = process.env[key];
   if (!val) throw new Error(`Missing required environment variable: ${key}`);
   return val;
