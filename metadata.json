@@ -1,0 +1,6 @@
+{
+  "name": "LeadFlow",
+  "description": "AI-powered lead capture and appointment booking platform for HVAC companies.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
