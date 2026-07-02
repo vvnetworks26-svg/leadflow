@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const CreateLeadSchema = z.object({
   name:                z.string().min(1).trim(),
-  email:               z.string().email().toLowerCase().trim().optional().default(''),
+  email:               z.union([z.string().email().toLowerCase().trim(), z.literal('')]).optional().default(''),
   phone:               z.string().min(7).trim(),
   address:             z.string().trim().optional().default(''),
   zipCode:             z.string().trim().optional(),

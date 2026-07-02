@@ -2,10 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { ConversationService } from '../services/ConversationService';
 import { ConversationQuerySchema } from '../dto/conversation.dto';
 import { param } from '../utils/params';
+import { parseQuery } from '../utils/validate';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const q = ConversationQuerySchema.parse(req.query);
+    const q = parseQuery(ConversationQuerySchema, req.query);
     const result = await ConversationService.list(q);
     res.json({ status: 'ok', ...result });
   } catch (e) { next(e); }

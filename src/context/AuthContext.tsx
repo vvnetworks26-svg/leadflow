@@ -195,8 +195,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
    * Logout: call backend then clear local state.
    */
   const logout = useCallback(async (): Promise<void> => {
+    const refreshToken = localStorage.getItem(KEYS.refreshToken);
     try {
-      await apiClient.post('/auth/logout');
+      // Send the refresh token in the body — no access token required
+      if (refreshToken) {
+        await apiClient.post('/auth/logout', { refreshToken });
+      }
     } catch {
       // Proceed with local logout even if the request fails
     } finally {

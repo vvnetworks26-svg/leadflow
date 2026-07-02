@@ -4,7 +4,7 @@
 
 import { createApp } from './app';
 import { env } from './config/env';
-import { connectDatabase, disconnectDatabase } from './config/database';
+import { connectDatabase, disconnectDatabase, isDatabaseConnected } from './config/database';
 import { logger } from './utils/logger';
 
 async function start(): Promise<void> {
@@ -16,13 +16,25 @@ async function start(): Promise<void> {
   const app = createApp();
 
   const server = app.listen(env.PORT, () => {
-    logger.info(`LeadFlow API  v${env.API_VERSION}  [${env.NODE_ENV}]`);
-    logger.info(`Listening on http://localhost:${env.PORT}`);
-    logger.info(`Health check  http://localhost:${env.PORT}/api/v1/health`);
+    // Structured startup log — operational context only, no secret values
+    logger.info(
+      {
+        environment:       env.NODE_ENV,
+        version:           env.API_VERSION,
+        port:              env.PORT,
+        database:          isDatabaseConnected() ? 'connected' : 'disconnected',
+        buildTime:         process.env.BUILD_TIMESTAMP ?? 'development',
+        globalRateLimit:   'enabled (200 req / 15 min)',
+        mongoSanitize:     'enabled',
+        helmet:            'enabled (CSP disabled)',
+        corsMode:          env.isProd ? 'production (Origin required)' : 'development (Origin optional)',
+      },
+      'LeadFlow API started'
+    );
   });
 
   function shutdown(signal: string): void {
-    logger.info(`${signal} received — shutting down gracefully`);
+    logger.info({ signal }, 'Shutdown signal received — closing gracefully');
     server.close(async () => {
       await disconnectDatabase();
       logger.info('Server closed');

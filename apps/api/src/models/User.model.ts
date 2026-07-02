@@ -10,7 +10,6 @@ export interface IUser {
   email: string;
   passwordHash: string;
   role: UserRole;
-  refreshToken?: string;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -29,7 +28,6 @@ const UserSchema = new Schema<UserDocument>(
     email:        { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
     role:         { type: String, enum: ['owner', 'admin', 'technician'], default: 'owner' },
-    refreshToken: { type: String, select: false },  // never returned by default
   },
   {
     timestamps: true,
@@ -40,7 +38,6 @@ const UserSchema = new Schema<UserDocument>(
         ret.id = ret._id.toString();
         delete (ret as any)._id;
         delete (ret as any).passwordHash;   // never expose the hash
-        delete (ret as any).refreshToken;   // never expose refresh token
         return ret;
       },
     },

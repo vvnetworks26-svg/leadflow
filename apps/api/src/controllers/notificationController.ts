@@ -2,10 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { NotificationService } from '../services/NotificationService';
 import { NotificationQuerySchema } from '../dto/notification.dto';
 import { param } from '../utils/params';
+import { parseQuery } from '../utils/validate';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const q = NotificationQuerySchema.parse(req.query);
+    const q = parseQuery(NotificationQuerySchema, req.query);
     const result = await NotificationService.list(q);
     res.json({ status: 'ok', ...result });
   } catch (e) { next(e); }

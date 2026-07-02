@@ -2,10 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { LeadService } from '../services/LeadService';
 import { LeadQuerySchema } from '../dto/lead.dto';
 import { param } from '../utils/params';
+import { parseQuery } from '../utils/validate';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const q = LeadQuerySchema.parse(req.query);
+    const q = parseQuery(LeadQuerySchema, req.query);
     const result = await LeadService.list(q);
     res.json({ status: 'ok', ...result });
   } catch (e) { next(e); }

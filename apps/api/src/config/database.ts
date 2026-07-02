@@ -18,6 +18,8 @@ import '../models/Conversation.model';
 import '../models/Business.model';
 import '../models/Notification.model';
 import '../models/User.model';
+import '../models/Session.model';
+import '../models/AuditLog.model';
 
 const CONNECTION_OPTIONS: mongoose.ConnectOptions = {
   maxPoolSize: 10,
@@ -57,8 +59,3 @@ export async function disconnectDatabase(): Promise<void> {
 export function isDatabaseConnected(): boolean {
   return mongoose.connection.readyState === 1;
 }
-
-export const databaseConfig = {
-  uri: env.MONGODB_URI,
-  options: CONNECTION_OPTIONS,
-} as const;

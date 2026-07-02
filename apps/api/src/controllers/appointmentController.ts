@@ -2,10 +2,11 @@ import { Request, Response, NextFunction } from 'express';
 import { AppointmentService } from '../services/AppointmentService';
 import { AppointmentQuerySchema } from '../dto/appointment.dto';
 import { param } from '../utils/params';
+import { parseQuery } from '../utils/validate';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const q = AppointmentQuerySchema.parse(req.query);
+    const q = parseQuery(AppointmentQuerySchema, req.query);
     const result = await AppointmentService.list(q);
     res.json({ status: 'ok', ...result });
   } catch (e) { next(e); }
