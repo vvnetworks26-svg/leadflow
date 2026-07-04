@@ -1,0 +1,29 @@
+{
+  "compilerOptions": {
+    // Target ES2017+ — covers all browsers that support async/await natively.
+    // Keeps the output readable and avoids regenerator-runtime overhead.
+    "target": "ES2017",
+
+    // Browser globals: DOM + ES2020 core (Promise, Object.fromEntries, etc.)
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+
+    // Pure TypeScript source — no JSX, no framework
+    "module":           "ESNext",
+    "moduleResolution": "bundler",
+    "isolatedModules":  true,
+    "moduleDetection":  "force",
+
+    // Strict type safety
+    "strict":           true,
+    "noImplicitAny":    true,
+    "noUnusedLocals":   true,
+    "noUnusedParameters": true,
+
+    // esbuild handles emit — tsc is type-check only
+    "noEmit":           true,
+
+    "skipLibCheck":     true
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
+}

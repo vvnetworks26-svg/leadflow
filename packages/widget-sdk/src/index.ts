@@ -1,0 +1,147 @@
+/**
+ * index.ts — LeadFlow Widget SDK entry point.
+ * B.1.4: Adds configuration service API to window.__LEADFLOW__.
+ */
+
+import { parseScriptAttributes, parseConfig } from './config';
+import { initializeWidget, destroyWidget }     from './loader';
+import { getDiagnostics, wireEventCounter }    from './diagnostics';
+import { runtime }                             from './runtime';
+import { eventBus }                            from './eventBus';
+import { registry }                            from './registry';
+import { LOG_PREFIX, WINDOW_GLOBAL }           from './constants';
+import type { LeadFlowSDK, WidgetConfig, InitializationStatus } from './types';
+import type { IWidgetModule }                  from './module';
+import type { TransportAdapter }               from './transport/types';
+import type { CredentialsProvider }            from './auth/types';
+
+wireEventCounter();
+
+const sdk: LeadFlowSDK = {
+  initialize(config: WidgetConfig): Promise<InitializationStatus> {
+    return initializeWidget(config);
+  },
+  destroy(): void { destroyWidget(); },
+  getStatus()     { return runtime.status; },
+  getVersion()    { return runtime.sdkVersion; },
+  getConfig()     { return runtime.config; },
+  getDiagnostics(){ return getDiagnostics(); },
+  get runtime()   { return runtime; },
+  get eventBus()  { return eventBus; },
+  registerModule(mod: IWidgetModule): boolean  { return registry.register(mod); },
+  unregisterModule(id: string): boolean        { return registry.unregister(id, runtime.config); },
+  listModules(): string[]                      { return registry.getAll().map(m => m.id); },
+
+  // ── B.1.4 ─────────────────────────────────────────────────────────────────
+  getConfiguration() {
+    return runtime.configuration.getResolvedConfig();
+  },
+  reloadConfiguration() {
+    return runtime.configuration.resolve();
+  },
+  setConfigurationOverrides(overrides: Partial<WidgetConfig>) {
+    return runtime.configuration.setRuntimeOverrides(overrides);
+  },
+  resetConfiguration() {
+    return runtime.configuration.reset();
+  },
+
+  // ── B.2.1 ─────────────────────────────────────────────────────────────────
+  get transport() {
+    return runtime.transport;
+  },
+  setTransportAdapter(adapter: TransportAdapter): void {
+    runtime.transport.setAdapter(adapter);
+  },
+  getTransportAdapter(): string {
+    return runtime.transport.getAdapter().name;
+  },
+
+  // ── B.2.3 ─────────────────────────────────────────────────────────────────
+  get credentials() {
+    return runtime.credentials;
+  },
+  setCredentialsProvider(provider: CredentialsProvider): void {
+    runtime.credentials.setProvider(provider);
+  },
+  isAuthenticated(): boolean {
+    return runtime.credentials.isAuthenticated();
+  },
+
+  // ── B.2.4 ─────────────────────────────────────────────────────────────────
+  get orchestrator() {
+    return runtime.orchestrator;
+  },
+
+  // ── B.2.5 ─────────────────────────────────────────────────────────────────
+  get retryEngine() {
+    return runtime.retryEngine;
+  },
+
+  // ── B.2.6 ─────────────────────────────────────────────────────────────────
+  get resilience() {
+    return runtime.resilience;
+  },
+
+  // ── B.2.7 ─────────────────────────────────────────────────────────────────
+  get connectivity() {
+    return runtime.connectivity;
+  },
+};
+
+(window as unknown as Record<string, unknown>)[WINDOW_GLOBAL] = sdk;
+
+// ─── Script tag locator ───────────────────────────────────────────────────────
+
+function findScriptTag(): HTMLScriptElement | null {
+  if (document.currentScript instanceof HTMLScriptElement) {
+    return document.currentScript;
+  }
+  const scripts = Array.from(
+    document.querySelectorAll<HTMLScriptElement>('script[data-business]')
+  );
+  return scripts.length > 0 ? scripts[scripts.length - 1] : null;
+}
+
+// ─── Auto-initialization IIFE ─────────────────────────────────────────────────
+
+(async function run(): Promise<void> {
+  const script = findScriptTag();
+
+  if (!script) {
+    console.error(
+      `${LOG_PREFIX} Could not locate the LeadFlow script tag. ` +
+      `Ensure the <script> tag has a data-business attribute and is loaded ` +
+      `synchronously (not via dynamic import).`
+    );
+    return;
+  }
+
+  // B.1.4: Load script attributes into the Configuration Service (Layer 2)
+  const scriptLayer = parseScriptAttributes(script);
+  runtime.configuration.load(scriptLayer);
+  const resolvedConfig = runtime.configuration.resolve();
+
+  // Fallback to legacy parseConfig for error messaging on missing businessId
+  if (!resolvedConfig) {
+    parseConfig(script);   // triggers the descriptive console.error
+    return;
+  }
+
+  const status = await initializeWidget(resolvedConfig);
+
+  switch (status) {
+    case 'mounted':
+      console.log(
+        `${LOG_PREFIX} Widget initialized. ` +
+        `business=${resolvedConfig.businessId}  ` +
+        `position=${resolvedConfig.position}  ` +
+        `theme=${resolvedConfig.theme}  ` +
+        `v=${runtime.sdkVersion}`
+      );
+      break;
+    case 'already-initialized':
+    case 'error':
+      break;
+  }
+})();

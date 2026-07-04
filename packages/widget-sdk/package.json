@@ -1,0 +1,16 @@
+{
+  "name": "@leadflow/widget-sdk",
+  "version": "0.1.0",
+  "description": "LeadFlow embeddable widget SDK — browser loader foundation",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit && node build.mjs",
+    "lint":  "tsc --noEmit",
+    "dev":   "node build.mjs --watch"
+  },
+  "devDependencies": {
+    "@types/node": "^22.14.0",
+    "esbuild":     "^0.25.0",
+    "typescript":  "~5.8.2"
+  }
+}
