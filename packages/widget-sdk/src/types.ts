@@ -15,6 +15,7 @@ import type { IRequestOrchestrator } from './orchestrator/types';
 import type { IRetryEngine }         from './retry/types';
 import type { IResilienceManager }   from './resilience/types';
 import type { IConnectivityManager } from './connectivity/types';
+import type { IRealtimeManager }     from './realtime/types';
 
 // ─── Widget position ──────────────────────────────────────────────────────────
 
@@ -73,6 +74,8 @@ export interface WidgetRuntime {
   resilience:    IResilienceManager;
   /** B.2.7: The Connectivity Manager instance owned by this runtime. */
   connectivity:  IConnectivityManager;
+  /** B.2.8: The Realtime Manager instance owned by this runtime. */
+  realtime:      IRealtimeManager;
 }
 
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
@@ -150,6 +153,14 @@ export interface DiagnosticsInfo {
   replayedRequests:         number;
   failedReplays:            number;
   lastReconnect:            string | null;
+
+  // B.2.8 additions
+  realtimeStatus:           string;
+  realtimeConnectedAt:      string | null;
+  realtimeReconnectCount:   number;
+  realtimeHeartbeatCount:   number;
+  realtimeSubscriptions:    string[];
+  realtimeAdapterType:      string;
 }
 
 // ─── Public SDK API ──────────────────────────────────────────────────────────
@@ -201,4 +212,8 @@ export interface LeadFlowSDK {
   // B.2.7
   /** The connectivity manager — online/offline detection and offline queue. */
   connectivity: IConnectivityManager;
+
+  // B.2.8
+  /** The realtime manager — connection, channels, heartbeat. */
+  realtime: IRealtimeManager;
 }

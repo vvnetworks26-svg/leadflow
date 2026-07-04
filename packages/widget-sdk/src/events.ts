@@ -81,6 +81,16 @@ export const WidgetEvent = {
   QUEUE_REPLAY_STARTED:   'QUEUE_REPLAY_STARTED',
   QUEUE_REPLAY_COMPLETED: 'QUEUE_REPLAY_COMPLETED',
   QUEUE_REPLAY_FAILED:    'QUEUE_REPLAY_FAILED',
+
+  // Realtime Layer (B.2.8)
+  REALTIME_CONNECTED:    'REALTIME_CONNECTED',
+  REALTIME_DISCONNECTED: 'REALTIME_DISCONNECTED',
+  REALTIME_RECONNECTING: 'REALTIME_RECONNECTING',
+  REALTIME_SUBSCRIBED:   'REALTIME_SUBSCRIBED',
+  REALTIME_UNSUBSCRIBED: 'REALTIME_UNSUBSCRIBED',
+  REALTIME_MESSAGE:      'REALTIME_MESSAGE',
+  HEARTBEAT_SENT:        'HEARTBEAT_SENT',
+  HEARTBEAT_RECEIVED:    'HEARTBEAT_RECEIVED',
 } as const;
 
 export type WidgetEventName = typeof WidgetEvent[keyof typeof WidgetEvent];
@@ -405,6 +415,48 @@ export interface QueueReplayFailedPayload {
   failedRequests:   number;
 }
 
+// ─── B.2.8 Realtime Layer payloads ───────────────────────────────────────────
+
+export interface RealtimeConnectedPayload {
+  timestamp:      string;
+  adapterType:    string;
+  reconnectCount: number;
+}
+export interface RealtimeDisconnectedPayload {
+  timestamp:   string;
+  adapterType: string;
+  reason:      string;
+}
+export interface RealtimeReconnectingPayload {
+  timestamp: string;
+  attempt:   number;
+  delayMs:   number;
+}
+export interface RealtimeSubscribedPayload {
+  timestamp:      string;
+  channel:        string;
+  subscriptionId: string;
+}
+export interface RealtimeUnsubscribedPayload {
+  timestamp:      string;
+  channel:        string;
+  subscriptionId: string;
+}
+export interface RealtimeMessagePayload {
+  timestamp: string;
+  channel:   string;
+  event:     string;
+  messageId: string;
+}
+export interface HeartbeatSentPayload {
+  timestamp: string;
+  count:     number;
+}
+export interface HeartbeatReceivedPayload {
+  timestamp: string;
+  count:     number;
+}
+
 // ─── Event → Payload mapping ──────────────────────────────────────────────────
 
 /**
@@ -462,4 +514,13 @@ export interface EventPayloadMap {
   [WidgetEvent.QUEUE_REPLAY_STARTED]:   QueueReplayStartedPayload;
   [WidgetEvent.QUEUE_REPLAY_COMPLETED]: QueueReplayCompletedPayload;
   [WidgetEvent.QUEUE_REPLAY_FAILED]:    QueueReplayFailedPayload;
+  // B.2.8 realtime events
+  [WidgetEvent.REALTIME_CONNECTED]:    RealtimeConnectedPayload;
+  [WidgetEvent.REALTIME_DISCONNECTED]: RealtimeDisconnectedPayload;
+  [WidgetEvent.REALTIME_RECONNECTING]: RealtimeReconnectingPayload;
+  [WidgetEvent.REALTIME_SUBSCRIBED]:   RealtimeSubscribedPayload;
+  [WidgetEvent.REALTIME_UNSUBSCRIBED]: RealtimeUnsubscribedPayload;
+  [WidgetEvent.REALTIME_MESSAGE]:      RealtimeMessagePayload;
+  [WidgetEvent.HEARTBEAT_SENT]:        HeartbeatSentPayload;
+  [WidgetEvent.HEARTBEAT_RECEIVED]:    HeartbeatReceivedPayload;
 }

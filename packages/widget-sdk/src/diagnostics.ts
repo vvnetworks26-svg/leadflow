@@ -153,5 +153,18 @@ export function getDiagnostics(): DiagnosticsInfo {
         lastReconnect:       conn.lastReconnect,
       };
     })(),
+
+    // B.2.8
+    ...(() => {
+      const rt = runtime.realtime.getDiagnostics();
+      return {
+        realtimeStatus:         rt.connectionStatus,
+        realtimeConnectedAt:    rt.connectedAt,
+        realtimeReconnectCount: rt.reconnectCount,
+        realtimeHeartbeatCount: rt.heartbeatCount,
+        realtimeSubscriptions:  rt.subscriptions,
+        realtimeAdapterType:    rt.adapterType,
+      };
+    })(),
   };
 }

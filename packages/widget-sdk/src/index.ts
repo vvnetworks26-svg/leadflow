@@ -87,6 +87,11 @@ const sdk: LeadFlowSDK = {
   get connectivity() {
     return runtime.connectivity;
   },
+
+  // ── B.2.8 ─────────────────────────────────────────────────────────────────
+  get realtime() {
+    return runtime.realtime;
+  },
 };
 
 (window as unknown as Record<string, unknown>)[WINDOW_GLOBAL] = sdk;

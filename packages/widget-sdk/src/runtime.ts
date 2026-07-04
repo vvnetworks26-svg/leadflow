@@ -21,10 +21,12 @@ import { createOrchestrator }            from './orchestrator/orchestrator';
 import { createRetryEngine }             from './retry/engine';
 import { createResilienceManager }       from './resilience/manager';
 import { createConnectivityManager }     from './connectivity/manager';
+import { createRealtimeManager }         from './realtime/manager';
 import type { IRequestOrchestrator }     from './orchestrator/types';
 import type { IRetryEngine }             from './retry/types';
 import type { IResilienceManager }       from './resilience/types';
 import type { IConnectivityManager }     from './connectivity/types';
+import type { IRealtimeManager }         from './realtime/types';
 import type { WidgetRuntime, WidgetConfig, RuntimeStatus } from './types';
 
 // ─── Valid state transitions ──────────────────────────────────────────────────
@@ -54,6 +56,7 @@ export const runtime: WidgetRuntime = {
   retryEngine:   null as never,
   resilience:    null as never,
   connectivity:  null as never,
+  realtime:      null as never,
 };
 
 // Wire credential headers into transport (avoids circular import)
@@ -89,9 +92,12 @@ export const runtime: WidgetRuntime = {
   });
 
 // Create connectivity manager — wraps the orchestrator.
-// Consumers call runtime.connectivity.submit() instead of orchestrator.submit().
 (runtime as unknown as { connectivity: IConnectivityManager }).connectivity =
   createConnectivityManager(runtime.orchestrator);
+
+// Create realtime manager with default mock adapter.
+(runtime as unknown as { realtime: IRealtimeManager }).realtime =
+  createRealtimeManager();
 
 // ─── State machine ────────────────────────────────────────────────────────────
 
