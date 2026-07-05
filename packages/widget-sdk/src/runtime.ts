@@ -22,6 +22,8 @@ import { createRetryEngine }             from './retry/engine';
 import { createResilienceManager }       from './resilience/manager';
 import { createConnectivityManager }     from './connectivity/manager';
 import { createRealtimeManager }         from './realtime/manager';
+import { createRenderer }                from './rendering/renderer';
+import { createUIFoundation }            from './ui/foundation';
 import type { IRequestOrchestrator }     from './orchestrator/types';
 import type { IRetryEngine }             from './retry/types';
 import type { IResilienceManager }       from './resilience/types';
@@ -57,6 +59,10 @@ export const runtime: WidgetRuntime = {
   resilience:    null as never,
   connectivity:  null as never,
   realtime:      null as never,
+  renderer:      createRenderer(),
+  ui:            createUIFoundation(),
+  launcher:      null,   // created by loader after renderer mounts
+  conversation:  null,   // created by loader after renderer mounts
 };
 
 // Wire credential headers into transport (avoids circular import)

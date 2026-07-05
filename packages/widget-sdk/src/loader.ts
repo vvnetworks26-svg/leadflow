@@ -20,6 +20,8 @@ import { eventBus }                      from './eventBus';
 import { WidgetEvent }                   from './events';
 import { registry }                      from './registry';
 import { hooks }                         from './hooks';
+import { createLauncherController }      from './launcher/controller';
+import { createConversationController }  from './conversation/controller';
 import type { WidgetConfig, InitializationStatus } from './types';
 
 // ─── DOM readiness ────────────────────────────────────────────────────────────
@@ -120,6 +122,23 @@ export async function initializeWidget(
       elementId: root.id,
     });
 
+    // C.1: stamp position/colour on the root for the renderer to read,
+    // then invoke the renderer to build Shadow DOM + container hierarchy.
+    root.dataset['lfPosition']     = resolvedConfig.position;
+    root.dataset['lfPrimaryColor'] = resolvedConfig.primaryColor;
+    runtime.renderer.render(root);
+
+    // C.3: Create launcher controller once the content root exists
+    const contentRoot = runtime.renderer.getRoot();
+    if (contentRoot) {
+      (runtime as unknown as { launcher: ReturnType<typeof createLauncherController> }).launcher =
+        createLauncherController(contentRoot, resolvedConfig.position as import('./launcher/types').LauncherPosition);
+
+      // C.4: Create conversation controller in the same content root
+      (runtime as unknown as { conversation: ReturnType<typeof createConversationController> }).conversation =
+        createConversationController(contentRoot, runtime.ui.responsive, 'LeadFlow Chat');
+    }
+
     recordReady(resolvedConfig, root);
     transitionTo(RuntimeState.READY);
 
@@ -162,6 +181,17 @@ export function destroyWidget(): void {
 
   hooks.run('beforeDestroy');
   registry.destroyAll(runtime.config);
+
+  // C.3: destroy launcher
+  runtime.launcher?.destroy();
+  (runtime as unknown as { launcher: null }).launcher = null;
+
+  // C.4: destroy conversation
+  runtime.conversation?.destroy();
+  (runtime as unknown as { conversation: null }).conversation = null;
+
+  // C.1: destroy renderer before removing the root element
+  runtime.renderer.destroy();
 
   const root = runtime.rootElement;
   if (root && root.parentNode) {

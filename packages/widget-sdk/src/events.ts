@@ -91,6 +91,38 @@ export const WidgetEvent = {
   REALTIME_MESSAGE:      'REALTIME_MESSAGE',
   HEARTBEAT_SENT:        'HEARTBEAT_SENT',
   HEARTBEAT_RECEIVED:    'HEARTBEAT_RECEIVED',
+
+  // Rendering (C.1)
+  RENDERER_MOUNTED:   'RENDERER_MOUNTED',
+  RENDERER_UPDATED:   'RENDERER_UPDATED',
+  RENDERER_UNMOUNTED: 'RENDERER_UNMOUNTED',
+  STYLES_INJECTED:    'STYLES_INJECTED',
+
+  // UI Foundation (C.2)
+  THEME_CHANGED:       'THEME_CHANGED',
+  LAYOUT_UPDATED:      'LAYOUT_UPDATED',
+  RESPONSIVE_CHANGED:  'RESPONSIVE_CHANGED',
+  ANIMATION_STARTED:   'ANIMATION_STARTED',
+  ANIMATION_COMPLETED: 'ANIMATION_COMPLETED',
+  OVERLAY_CREATED:     'OVERLAY_CREATED',
+  OVERLAY_REMOVED:     'OVERLAY_REMOVED',
+  FOCUS_CHANGED:       'FOCUS_CHANGED',
+
+  // Launcher (C.3)
+  LAUNCHER_OPENED:  'LAUNCHER_OPENED',
+  LAUNCHER_CLOSED:  'LAUNCHER_CLOSED',
+  LAUNCHER_TOGGLED: 'LAUNCHER_TOGGLED',
+  LAUNCHER_SHOWN:   'LAUNCHER_SHOWN',
+  LAUNCHER_HIDDEN:  'LAUNCHER_HIDDEN',
+  BADGE_UPDATED:    'BADGE_UPDATED',
+
+  // Conversation (C.4)
+  CONVERSATION_OPENED:   'CONVERSATION_OPENED',
+  CONVERSATION_CLOSED:   'CONVERSATION_CLOSED',
+  CONVERSATION_MINIMIZED:'CONVERSATION_MINIMIZED',
+  CONVERSATION_RESTORED: 'CONVERSATION_RESTORED',
+  INPUT_CHANGED:         'INPUT_CHANGED',
+  SEND_REQUESTED:        'SEND_REQUESTED',
 } as const;
 
 export type WidgetEventName = typeof WidgetEvent[keyof typeof WidgetEvent];
@@ -457,6 +489,55 @@ export interface HeartbeatReceivedPayload {
   count:     number;
 }
 
+// ─── C.1 Rendering payloads ───────────────────────────────────────────────────
+
+export interface RendererMountedPayload {
+  timestamp:  string;
+  elementId:  string;
+  shadowDOM:  boolean;
+}
+export interface RendererUpdatedPayload {
+  timestamp: string;
+  changes:   string[];
+}
+export interface RendererUnmountedPayload {
+  timestamp: string;
+  elementId: string;
+}
+export interface StylesInjectedPayload {
+  timestamp:  string;
+  styleType:  string;
+}
+
+// ─── C.2 UI Foundation payloads ───────────────────────────────────────────────
+
+export interface ThemeChangedPayload       { timestamp: string; mode: string; resolved: string; }
+export interface LayoutUpdatedPayload      { timestamp: string; layout: string; }
+export interface ResponsiveChangedPayload  { timestamp: string; breakpoint: string; width: number; height: number; }
+export interface AnimationStartedPayload   { timestamp: string; animId: string; type: string; direction: string; }
+export interface AnimationCompletedPayload { timestamp: string; animId: string; type: string; }
+export interface OverlayCreatedPayload     { timestamp: string; overlayId: string; type: string; zIndex: number; }
+export interface OverlayRemovedPayload     { timestamp: string; overlayId: string; }
+export interface FocusChangedPayload       { timestamp: string; trapped: boolean; }
+
+// ─── C.3 Launcher payloads ───────────────────────────────────────────────────
+
+export interface LauncherOpenedPayload  { timestamp: string; position: string; }
+export interface LauncherClosedPayload  { timestamp: string; position: string; }
+export interface LauncherToggledPayload { timestamp: string; isOpen: boolean; }
+export interface LauncherShownPayload   { timestamp: string; }
+export interface LauncherHiddenPayload  { timestamp: string; }
+export interface BadgeUpdatedPayload    { timestamp: string; type: string; count: number; visible: boolean; }
+
+// ─── C.4 Conversation payloads ────────────────────────────────────────────────
+
+export interface ConversationOpenedPayload   { timestamp: string; }
+export interface ConversationClosedPayload   { timestamp: string; }
+export interface ConversationMinimizedPayload{ timestamp: string; }
+export interface ConversationRestoredPayload { timestamp: string; }
+export interface InputChangedPayload         { timestamp: string; length: number; }
+export interface SendRequestedPayload        { timestamp: string; length: number; }
+
 // ─── Event → Payload mapping ──────────────────────────────────────────────────
 
 /**
@@ -523,4 +604,32 @@ export interface EventPayloadMap {
   [WidgetEvent.REALTIME_MESSAGE]:      RealtimeMessagePayload;
   [WidgetEvent.HEARTBEAT_SENT]:        HeartbeatSentPayload;
   [WidgetEvent.HEARTBEAT_RECEIVED]:    HeartbeatReceivedPayload;
+  // C.1 rendering events
+  [WidgetEvent.RENDERER_MOUNTED]:   RendererMountedPayload;
+  [WidgetEvent.RENDERER_UPDATED]:   RendererUpdatedPayload;
+  [WidgetEvent.RENDERER_UNMOUNTED]: RendererUnmountedPayload;
+  [WidgetEvent.STYLES_INJECTED]:    StylesInjectedPayload;
+  // C.2 UI Foundation events
+  [WidgetEvent.THEME_CHANGED]:       ThemeChangedPayload;
+  [WidgetEvent.LAYOUT_UPDATED]:      LayoutUpdatedPayload;
+  [WidgetEvent.RESPONSIVE_CHANGED]:  ResponsiveChangedPayload;
+  [WidgetEvent.ANIMATION_STARTED]:   AnimationStartedPayload;
+  [WidgetEvent.ANIMATION_COMPLETED]: AnimationCompletedPayload;
+  [WidgetEvent.OVERLAY_CREATED]:     OverlayCreatedPayload;
+  [WidgetEvent.OVERLAY_REMOVED]:     OverlayRemovedPayload;
+  [WidgetEvent.FOCUS_CHANGED]:       FocusChangedPayload;
+  // C.3 launcher events
+  [WidgetEvent.LAUNCHER_OPENED]:  LauncherOpenedPayload;
+  [WidgetEvent.LAUNCHER_CLOSED]:  LauncherClosedPayload;
+  [WidgetEvent.LAUNCHER_TOGGLED]: LauncherToggledPayload;
+  [WidgetEvent.LAUNCHER_SHOWN]:   LauncherShownPayload;
+  [WidgetEvent.LAUNCHER_HIDDEN]:  LauncherHiddenPayload;
+  [WidgetEvent.BADGE_UPDATED]:    BadgeUpdatedPayload;
+  // C.4 conversation events
+  [WidgetEvent.CONVERSATION_OPENED]:    ConversationOpenedPayload;
+  [WidgetEvent.CONVERSATION_CLOSED]:    ConversationClosedPayload;
+  [WidgetEvent.CONVERSATION_MINIMIZED]: ConversationMinimizedPayload;
+  [WidgetEvent.CONVERSATION_RESTORED]:  ConversationRestoredPayload;
+  [WidgetEvent.INPUT_CHANGED]:          InputChangedPayload;
+  [WidgetEvent.SEND_REQUESTED]:         SendRequestedPayload;
 }

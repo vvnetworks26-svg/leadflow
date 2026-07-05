@@ -166,5 +166,58 @@ export function getDiagnostics(): DiagnosticsInfo {
         realtimeAdapterType:    rt.adapterType,
       };
     })(),
+
+    // C.1
+    ...(() => {
+      const rd = (runtime.renderer as unknown as {
+        getDiagnostics(): import('./rendering/types').RenderDiagnostics
+      }).getDiagnostics();
+      return {
+        rendererMounted:        rd.mounted,
+        rendererShadowDOM:      rd.shadowDOM,
+        rendererContainerReady: rd.containerReady,
+        rendererStylesInjected: rd.stylesInjected,
+        rendererRenderCount:    rd.renderCount,
+      };
+    })(),
+
+    // C.2
+    ...(() => {
+      const ui = runtime.ui.getDiagnostics();
+      return {
+        activeTheme:      ui.activeTheme,
+        themeMode:        ui.themeMode,
+        overlayCount:     ui.overlayCount,
+        activeAnimations: ui.activeAnimations,
+        viewport:         ui.viewport,
+        componentCount:   ui.componentCount,
+      };
+    })(),
+
+    // C.3
+    ...(() => {
+      const ld = runtime.launcher?.getDiagnostics();
+      return {
+        launcherVisible:     ld?.launcherVisible     ?? false,
+        launcherEnabled:     ld?.launcherEnabled     ?? false,
+        launcherOpen:        ld?.launcherOpen        ?? false,
+        launcherPosition:    ld?.launcherPosition    ?? 'none',
+        badgeCount:          ld?.badgeCount          ?? 0,
+        launcherToggleCount: ld?.toggleCount         ?? 0,
+      };
+    })(),
+
+    // C.4
+    ...(() => {
+      const cd = runtime.conversation?.getDiagnostics();
+      return {
+        conversationVisible: cd?.conversationVisible ?? false,
+        conversationState:   cd?.conversationState   ?? 'closed',
+        inputLength:         cd?.inputLength         ?? 0,
+        messageCount:        cd?.messageCount        ?? 0,
+        minimized:           cd?.minimized           ?? false,
+        fullscreen:          cd?.fullscreen          ?? false,
+      };
+    })(),
   };
 }

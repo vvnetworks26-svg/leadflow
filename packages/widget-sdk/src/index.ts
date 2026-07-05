@@ -92,6 +92,26 @@ const sdk: LeadFlowSDK = {
   get realtime() {
     return runtime.realtime;
   },
+
+  // ── C.1 ───────────────────────────────────────────────────────────────────
+  get renderer() {
+    return runtime.renderer;
+  },
+
+  // ── C.2 ───────────────────────────────────────────────────────────────────
+  get ui() {
+    return runtime.ui;
+  },
+
+  // ── C.3 ───────────────────────────────────────────────────────────────────
+  get launcher() {
+    return runtime.launcher;
+  },
+
+  // ── C.4 ───────────────────────────────────────────────────────────────────
+  get conversation() {
+    return runtime.conversation;
+  },
 };
 
 (window as unknown as Record<string, unknown>)[WINDOW_GLOBAL] = sdk;

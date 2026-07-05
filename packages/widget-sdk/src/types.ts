@@ -16,6 +16,10 @@ import type { IRetryEngine }         from './retry/types';
 import type { IResilienceManager }   from './resilience/types';
 import type { IConnectivityManager } from './connectivity/types';
 import type { IRealtimeManager }     from './realtime/types';
+import type { IRenderer }            from './rendering/types';
+import type { IUIFoundation }        from './ui/types';
+import type { ILauncherController } from './launcher/types';
+import type { IConversationController } from './conversation/types';
 
 // ─── Widget position ──────────────────────────────────────────────────────────
 
@@ -76,6 +80,14 @@ export interface WidgetRuntime {
   connectivity:  IConnectivityManager;
   /** B.2.8: The Realtime Manager instance owned by this runtime. */
   realtime:      IRealtimeManager;
+  /** C.1: The Widget Renderer instance owned by this runtime. */
+  renderer:      IRenderer;
+  /** C.2: The UI Foundation instance owned by this runtime. */
+  ui:            IUIFoundation;
+  /** C.3: The Launcher Controller instance owned by this runtime. */
+  launcher:      ILauncherController | null;
+  /** C.4: The Conversation Controller instance owned by this runtime. */
+  conversation:  IConversationController | null;
 }
 
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
@@ -161,6 +173,37 @@ export interface DiagnosticsInfo {
   realtimeHeartbeatCount:   number;
   realtimeSubscriptions:    string[];
   realtimeAdapterType:      string;
+
+  // C.1 additions
+  rendererMounted:        boolean;
+  rendererShadowDOM:      boolean;
+  rendererContainerReady: boolean;
+  rendererStylesInjected: boolean;
+  rendererRenderCount:    number;
+
+  // C.2 additions
+  activeTheme:       string;
+  themeMode:         string;
+  overlayCount:      number;
+  activeAnimations:  number;
+  viewport:          string;
+  componentCount:    number;
+
+  // C.3 additions
+  launcherVisible:   boolean;
+  launcherEnabled:   boolean;
+  launcherOpen:      boolean;
+  launcherPosition:  string;
+  badgeCount:        number;
+  launcherToggleCount: number;
+
+  // C.4 additions
+  conversationVisible: boolean;
+  conversationState:   string;
+  inputLength:         number;
+  messageCount:        number;
+  minimized:           boolean;
+  fullscreen:          boolean;
 }
 
 // ─── Public SDK API ──────────────────────────────────────────────────────────
@@ -216,4 +259,20 @@ export interface LeadFlowSDK {
   // B.2.8
   /** The realtime manager — connection, channels, heartbeat. */
   realtime: IRealtimeManager;
+
+  // C.1
+  /** The widget renderer — Shadow DOM, container, styles. */
+  renderer: IRenderer;
+
+  // C.2
+  /** The UI Foundation — theme, layout, animation, overlay, focus, responsive. */
+  ui: IUIFoundation;
+
+  // C.3
+  /** The launcher controller — open/close/toggle/badge/position. */
+  launcher: ILauncherController | null;
+
+  // C.4
+  /** The conversation controller — shell, header, body, composer. */
+  conversation: IConversationController | null;
 }
