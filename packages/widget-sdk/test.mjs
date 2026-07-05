@@ -539,6 +539,184 @@ console.log('\n── C.5 Lifecycle ──────────────�
 }
 
 // ════════════════════════════════════════════════════════════
+// C.6 — Dashboard Controller API
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Dashboard Controller API ────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_db'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  check('C6 DA1: dashboard exposed on sdk',            sdk.dashboard!==null,                      typeof sdk.dashboard);
+  check('C6 DA1: runtime.dashboard===sdk.dashboard',   sdk.runtime.dashboard===sdk.dashboard,     '');
+  check('C6 DA1: connectDashboard() is a function',    typeof sdk.connectDashboard==='function',  '');
+  check('C6 DA1: disconnectDashboard() is fn',         typeof sdk.disconnectDashboard==='function','');
+  check('C6 DA1: pushDashboardConfig() is fn',         typeof sdk.pushDashboardConfig==='function','');
+  check('C6 DA1: pullDashboardState() is fn',          typeof sdk.pullDashboardState==='function', '');
+  check('C6 DA1: rollbackDashboardConfig() is fn',     typeof sdk.rollbackDashboardConfig==='function','');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Connect & Disconnect
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Connect & Disconnect ────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_dc'}});
+  await runBundle(b); const sdk=b.sdk;
+  const db=sdk.dashboard;
+
+  check('C6 CD1: not connected initially',             db?.isConnected()===false,                 `connected=${db?.isConnected()}`);
+
+  const r=db?.connect();
+  check('C6 CD2: connect() returns result',            typeof r==='object'&&r!==null,             '');
+  check('C6 CD3: isConnected()=true after connect',    db?.isConnected()===true,                  `connected=${db?.isConnected()}`);
+
+  db?.disconnect();
+  check('C6 CD4: isConnected()=false after disconnect',db?.isConnected()===false,                 `connected=${db?.isConnected()}`);
+
+  // SDK convenience methods
+  const r2=sdk.connectDashboard();
+  check('C6 CD5: sdk.connectDashboard() works',        r2!==null&&typeof r2==='object',           '');
+  sdk.disconnectDashboard();
+  check('C6 CD6: sdk.disconnectDashboard() works',     db?.isConnected()===false,                 '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Config Sync
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Config Sync ─────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_cs'}});
+  await runBundle(b); const sdk=b.sdk;
+  const db=sdk.dashboard;
+
+  // Connect with initial config
+  const initResult=db?.connect({theme:'dark',primaryColor:'#ff0000'});
+  check('C6 CS1: connect with config succeeds',        initResult?.success===true,                `success=${initResult?.success}`);
+  check('C6 CS2: connect returns version',             typeof initResult?.version==='number',     `v=${initResult?.version}`);
+
+  // Push incremental update
+  const pushResult=sdk.pushDashboardConfig({theme:'light'});
+  check('C6 CS3: push() succeeds',                     pushResult?.success===true,                `success=${pushResult?.success}`);
+  check('C6 CS4: push returns changedFields',          Array.isArray(pushResult?.changedFields),  '');
+  check('C6 CS5: theme in changedFields',              pushResult?.changedFields?.includes('theme'), `fields=${pushResult?.changedFields}`);
+  check('C6 CS6: version increments on push',          (pushResult?.version??0) > (initResult?.version??0), `v=${pushResult?.version}`);
+
+  // Theme applied to config service
+  const resolved=sdk.runtime.configuration.getResolvedConfig();
+  check('C6 CS7: theme applied to runtime config',     resolved?.theme==='light',                 `theme=${resolved?.theme}`);
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Pull (Observer)
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Pull / Observer ─────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_ob'}});
+  await runBundle(b); const sdk=b.sdk;
+  sdk.connectDashboard();
+
+  const state=sdk.pullDashboardState();
+  check('C6 OB1: pull() returns object',               typeof state==='object'&&state!==null,     '');
+  check('C6 OB2: state.theme is string',               typeof state?.theme==='string',            `theme=${state?.theme}`);
+  check('C6 OB3: state.launcherOpen is boolean',       typeof state?.launcherOpen==='boolean',    '');
+  check('C6 OB4: state.conversationState is string',   typeof state?.conversationState==='string','');
+  check('C6 OB5: state.installationStatus is string',  typeof state?.installationStatus==='string','');
+  check('C6 OB6: state.configVersion is number',       typeof state?.configVersion==='number',    `v=${state?.configVersion}`);
+  check('C6 OB7: state.resolvedConfig is object',      typeof state?.resolvedConfig==='object',   '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Rollback
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Rollback ────────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_rb'}});
+  await runBundle(b); const sdk=b.sdk;
+  const db=sdk.dashboard;
+
+  db?.connect({theme:'auto'});
+  sdk.pushDashboardConfig({theme:'dark'});
+  check('C6 RB1: theme=dark after push',               sdk.runtime.configuration.getResolvedConfig()?.theme==='dark', `theme=${sdk.runtime.configuration.getResolvedConfig()?.theme}`);
+
+  const rbResult=sdk.rollbackDashboardConfig();
+  check('C6 RB2: rollback() returns result',           typeof rbResult==='object'&&rbResult!==null,'');
+  check('C6 RB3: rollback result has rolledBack=true', rbResult?.rolledBack===true,                `rb=${rbResult?.rolledBack}`);
+  check('C6 RB4: rollback() emits no throw',           true,                                      'no throw');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Events
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Events ──────────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_dev6'}});
+  await runBundle(b); const sdk=b.sdk;
+  const evts={};
+  sdk.eventBus.on('DASHBOARD_CONNECTED',   p=>evts['connected']  =p);
+  sdk.eventBus.on('CONFIG_SYNC_STARTED',   p=>evts['syncStart']  =p);
+  sdk.eventBus.on('CONFIG_SYNC_COMPLETED', p=>evts['syncDone']   =p);
+  sdk.eventBus.on('CONFIG_CHANGED',        p=>evts['changed']    =p);
+  sdk.eventBus.on('CONFIG_ROLLBACK',       p=>evts['rollback']   =p);
+
+  sdk.connectDashboard({primaryColor:'#123456'});
+  check('C6 EV1: DASHBOARD_CONNECTED emitted',         !!evts['connected'],                       '');
+  check('C6 EV2: CONFIG_SYNC_STARTED emitted',         !!evts['syncStart'],                       '');
+  check('C6 EV3: CONFIG_SYNC_COMPLETED emitted',       !!evts['syncDone'],                        '');
+  check('C6 EV4: CONFIG_CHANGED emitted',              !!evts['changed'],                         '');
+  check('C6 EV5: CONFIG_CHANGED has changedFields',    Array.isArray(evts['changed']?.changedFields),'');
+  check('C6 EV6: CONFIG_CHANGED has diff',             Array.isArray(evts['changed']?.diff),      '');
+  check('C6 EV7: sync events have timestamp',          typeof evts['syncDone']?.timestamp==='string','');
+
+  sdk.rollbackDashboardConfig();
+  check('C6 EV8: CONFIG_ROLLBACK emitted',             !!evts['rollback'],                        '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Diagnostics
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Diagnostics ─────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_dd6'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  const d=sdk.getDiagnostics();
+  check('C6 DG1: dashboardConnected in diagnostics',   typeof d.dashboardConnected==='boolean',   `connected=${d.dashboardConnected}`);
+  check('C6 DG2: configVersion in diagnostics',        typeof d.configVersion==='number',         `v=${d.configVersion}`);
+  check('C6 DG3: lastSync in diagnostics',             d.lastSync===null||typeof d.lastSync==='string','');
+  check('C6 DG4: pendingUpdates in diagnostics',       typeof d.pendingUpdates==='number',        '');
+  check('C6 DG5: rollbackAvailable in diagnostics',    typeof d.rollbackAvailable==='boolean',    '');
+  check('C6 DG6: dashboardConnected=false initially',  d.dashboardConnected===false,              `connected=${d.dashboardConnected}`);
+  check('C6 DG7: JSON-serialisable',
+    (()=>{try{JSON.stringify(d);return true;}catch{return false;}})(), '');
+
+  sdk.connectDashboard({theme:'dark'});
+  const d2=sdk.getDiagnostics();
+  check('C6 DG8: dashboardConnected=true after connect',d2.dashboardConnected===true,             `connected=${d2.dashboardConnected}`);
+  check('C6 DG9: configVersion>0 after sync',          d2.configVersion>0,                        `v=${d2.configVersion}`);
+  check('C6 DG10: lastSync is string after connect',   typeof d2.lastSync==='string',             `sync=${d2.lastSync}`);
+}
+
+// ════════════════════════════════════════════════════════════
+// C.6 — Lifecycle (destroy + re-init)
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.6 Lifecycle ───────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_lc6'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  check('C6 LC1: dashboard exists after init',         sdk.dashboard!==null,                      '');
+  sdk.connectDashboard({theme:'dark'});
+  check('C6 LC2: connected after connectDashboard',    sdk.dashboard?.isConnected()===true,       '');
+
+  sdk.destroy();
+  check('C6 LC3: dashboard=null after destroy',        sdk.dashboard===null,                      '');
+
+  const s=await sdk.initialize({businessId:'biz_lc6b',position:'bottom-right',theme:'auto',primaryColor:'#6366f1'});
+  check('C6 LC4: dashboard restored after re-init',    sdk.dashboard!==null&&s==='mounted',       `status=${s}`);
+  check('C6 LC5: not connected after re-init',         sdk.dashboard?.isConnected()===false,      '');
+}
+
+// ════════════════════════════════════════════════════════════
 // Bundle
 // ════════════════════════════════════════════════════════════
 console.log('\n── Bundle ──────────────────────────────────────────────────────');
@@ -558,6 +736,9 @@ console.log('\n── Bundle ─────────────────
   check('BN: C.5 INSTALL_STARTED',  bundle.includes('INSTALL_STARTED'),                      'C.5 event');
   check('BN: C.5 embedMode',        bundle.includes('embedMode'),                            'C.5 embed');
   check('BN: C.5 compatibility',    bundle.includes('shadowDOM'),                            'C.5 compat');
+  check('BN: C.6 DASHBOARD_CONNECTED', bundle.includes('DASHBOARD_CONNECTED'),              'C.6 event');
+  check('BN: C.6 CONFIG_SYNC',      bundle.includes('CONFIG_SYNC_COMPLETED'),               'C.6 sync');
+  check('BN: C.6 CONFIG_CHANGED',   bundle.includes('CONFIG_CHANGED'),                      'C.6 diff');
   check('BN: version 0.1.0',        bundle.includes('0.1.0'),                                '');
   check('BN: zero runtime deps',
     (()=>{const pkg=JSON.parse(fs.readFileSync('./package.json','utf8'));return Object.keys(pkg.dependencies??{}).length===0;})(),'');

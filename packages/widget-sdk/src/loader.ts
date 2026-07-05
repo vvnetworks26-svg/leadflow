@@ -23,6 +23,7 @@ import { hooks }                         from './hooks';
 import { createLauncherController }      from './launcher/controller';
 import { createConversationController }  from './conversation/controller';
 import { createIntegrationManager }      from './integration/loader';
+import { createDashboardController }     from './dashboard/controller';
 import type { WidgetConfig, InitializationStatus } from './types';
 
 // ─── DOM readiness ────────────────────────────────────────────────────────────
@@ -161,6 +162,10 @@ export async function initializeWidget(
         true  // alreadyInstalled — widget just mounted successfully
       );
 
+    // C.6: Create dashboard controller (post-mount)
+    (runtime as unknown as { dashboard: ReturnType<typeof createDashboardController> }).dashboard =
+      createDashboardController(runtime, runtime.configuration);
+
     return 'mounted';
 
   } catch (err) {
@@ -204,6 +209,10 @@ export function destroyWidget(): void {
   const installationToDestroy = runtime.installation;
   (runtime as unknown as { installation: null }).installation = null;
   installationToDestroy?.destroy();
+
+  // C.6: destroy dashboard controller
+  runtime.dashboard?.destroy();
+  (runtime as unknown as { dashboard: null }).dashboard = null;
 
   // C.1: destroy renderer before removing the root element
   runtime.renderer.destroy();

@@ -21,6 +21,7 @@ import type { IUIFoundation }        from './ui/types';
 import type { ILauncherController } from './launcher/types';
 import type { IConversationController } from './conversation/types';
 import type { ILifecycleManager, EmbedMode, InstallResult } from './integration/types';
+import type { IDashboardController, DashboardConfig, SyncResult as DashboardSyncResult, ObservedState } from './dashboard/types';
 
 // ─── Widget position ──────────────────────────────────────────────────────────
 
@@ -91,6 +92,8 @@ export interface WidgetRuntime {
   conversation:  IConversationController | null;
   /** C.5: The Installation Lifecycle Manager owned by this runtime. */
   installation:  ILifecycleManager | null;
+  /** C.6: The Dashboard Controller owned by this runtime. */
+  dashboard:     IDashboardController | null;
 }
 
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
@@ -215,6 +218,13 @@ export interface DiagnosticsInfo {
   compatibilityWarnings:          string[];
   browserCapabilities:            import('./integration/types').BrowserCapabilities;
   duplicateInstallationPrevented: boolean;
+
+  // C.6 additions
+  dashboardConnected:   boolean;
+  configVersion:        number;
+  lastSync:             string | null;
+  pendingUpdates:       number;
+  rollbackAvailable:    boolean;
 }
 
 // ─── Public SDK API ──────────────────────────────────────────────────────────
@@ -295,4 +305,13 @@ export interface LeadFlowSDK {
   reinstall:              (embedMode?: EmbedMode) => Promise<InstallResult>;
   reload:                 () => Promise<InstallResult>;
   getInstallationStatus:  () => import('./integration/types').InstallationStatus;
+
+  // C.6
+  /** The dashboard controller — config sync, observer, bridge. */
+  dashboard:              IDashboardController | null;
+  connectDashboard:       (config?: DashboardConfig) => DashboardSyncResult;
+  disconnectDashboard:    () => void;
+  pushDashboardConfig:    (config: DashboardConfig) => DashboardSyncResult;
+  pullDashboardState:     () => ObservedState;
+  rollbackDashboardConfig:() => DashboardSyncResult;
 }

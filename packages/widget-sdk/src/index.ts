@@ -128,6 +128,29 @@ const sdk: LeadFlowSDK = {
   uninstall() {
     runtime.installation?.uninstall() ?? destroyWidget();
   },
+  // ── C.6 ───────────────────────────────────────────────────────────────────
+  get dashboard() {
+    return runtime.dashboard;
+  },
+  connectDashboard(config) {
+    if (!runtime.dashboard) throw new Error('[LeadFlow] dashboard not available — call initialize() first');
+    return runtime.dashboard.connect(config);
+  },
+  disconnectDashboard() {
+    runtime.dashboard?.disconnect();
+  },
+  pushDashboardConfig(config) {
+    if (!runtime.dashboard) throw new Error('[LeadFlow] dashboard not available — call initialize() first');
+    return runtime.dashboard.push(config);
+  },
+  pullDashboardState() {
+    if (!runtime.dashboard) throw new Error('[LeadFlow] dashboard not available — call initialize() first');
+    return runtime.dashboard.pull();
+  },
+  rollbackDashboardConfig() {
+    if (!runtime.dashboard) throw new Error('[LeadFlow] dashboard not available — call initialize() first');
+    return runtime.dashboard.rollback();
+  },
   async reinstall(embedMode) {
     if (!runtime.installation) {
       if (!runtime.config) throw new Error('[LeadFlow] reinstall() called before widget has ever been initialized');

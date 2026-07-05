@@ -131,6 +131,13 @@ export const WidgetEvent = {
   UNINSTALL_COMPLETED:    'UNINSTALL_COMPLETED',
   REINSTALL_COMPLETED:    'REINSTALL_COMPLETED',
   COMPATIBILITY_WARNING:  'COMPATIBILITY_WARNING',
+
+  // Dashboard (C.6)
+  DASHBOARD_CONNECTED:    'DASHBOARD_CONNECTED',
+  CONFIG_SYNC_STARTED:    'CONFIG_SYNC_STARTED',
+  CONFIG_SYNC_COMPLETED:  'CONFIG_SYNC_COMPLETED',
+  CONFIG_CHANGED:         'CONFIG_CHANGED',
+  CONFIG_ROLLBACK:        'CONFIG_ROLLBACK',
 } as const;
 
 export type WidgetEventName = typeof WidgetEvent[keyof typeof WidgetEvent];
@@ -576,6 +583,32 @@ export interface CompatibilityWarningPayload {
   capabilities: import('./integration/types').BrowserCapabilities;
 }
 
+// ─── C.6 Dashboard payloads ───────────────────────────────────────────────────
+
+export interface DashboardConnectedPayload {
+  timestamp: string;
+  version:   number;
+}
+export interface ConfigSyncStartedPayload {
+  timestamp: string;
+  version:   number;
+}
+export interface ConfigSyncCompletedPayload {
+  timestamp:     string;
+  version:       number;
+  changedFields: string[];
+}
+export interface ConfigChangedPayload {
+  timestamp:     string;
+  version:       number;
+  changedFields: string[];
+  diff:          Array<{ field: string; previous: string | null; current: string }>;
+}
+export interface ConfigRollbackPayload {
+  timestamp: string;
+  version:   number;
+}
+
 // ─── Event → Payload mapping ──────────────────────────────────────────────────
 
 /**
@@ -677,4 +710,10 @@ export interface EventPayloadMap {
   [WidgetEvent.UNINSTALL_COMPLETED]:   UninstallCompletedPayload;
   [WidgetEvent.REINSTALL_COMPLETED]:   ReinstallCompletedPayload;
   [WidgetEvent.COMPATIBILITY_WARNING]: CompatibilityWarningPayload;
+  // C.6 dashboard events
+  [WidgetEvent.DASHBOARD_CONNECTED]:   DashboardConnectedPayload;
+  [WidgetEvent.CONFIG_SYNC_STARTED]:   ConfigSyncStartedPayload;
+  [WidgetEvent.CONFIG_SYNC_COMPLETED]: ConfigSyncCompletedPayload;
+  [WidgetEvent.CONFIG_CHANGED]:        ConfigChangedPayload;
+  [WidgetEvent.CONFIG_ROLLBACK]:       ConfigRollbackPayload;
 }

@@ -236,5 +236,17 @@ export function getDiagnostics(): DiagnosticsInfo {
         duplicateInstallationPrevented: id?.duplicateInstallationPrevented ?? false,
       };
     })(),
+
+    // C.6
+    ...(() => {
+      const dd = runtime.dashboard?.getDiagnostics();
+      return {
+        dashboardConnected:  dd?.dashboardConnected  ?? false,
+        configVersion:       dd?.configVersion       ?? 0,
+        lastSync:            dd?.lastSync            ?? null,
+        pendingUpdates:      dd?.pendingUpdates      ?? 0,
+        rollbackAvailable:   dd?.rollbackAvailable   ?? false,
+      };
+    })(),
   };
 }

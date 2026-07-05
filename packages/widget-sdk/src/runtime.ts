@@ -64,6 +64,7 @@ export const runtime: WidgetRuntime = {
   launcher:      null,   // created by loader after renderer mounts
   conversation:  null,   // created by loader after renderer mounts
   installation:  null,   // created by loader after auto-init
+  dashboard:     null,   // created by loader after auto-init
 };
 
 // Wire credential headers into transport (avoids circular import)
