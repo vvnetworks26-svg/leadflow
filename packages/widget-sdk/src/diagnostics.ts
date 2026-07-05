@@ -219,5 +219,22 @@ export function getDiagnostics(): DiagnosticsInfo {
         fullscreen:          cd?.fullscreen          ?? false,
       };
     })(),
+
+    // C.5
+    ...(() => {
+      const id = runtime.installation?.getDiagnostics();
+      return {
+        installationStatus:             id?.installationStatus             ?? 'not-installed',
+        installationTime:               id?.installationTime               ?? null,
+        embedMode:                      id?.embedMode                      ?? 'floating',
+        compatibilityWarnings:          id?.compatibilityWarnings          ?? [],
+        browserCapabilities:            id?.browserCapabilities            ?? {
+          shadowDOM: false, webAnimationsAPI: false, abortController: false,
+          fetch: false, localStorage: false, resizeObserver: false,
+          intersectionObserver: false, customElements: false, cssVariables: false,
+        },
+        duplicateInstallationPrevented: id?.duplicateInstallationPrevented ?? false,
+      };
+    })(),
   };
 }

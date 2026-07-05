@@ -123,6 +123,14 @@ export const WidgetEvent = {
   CONVERSATION_RESTORED: 'CONVERSATION_RESTORED',
   INPUT_CHANGED:         'INPUT_CHANGED',
   SEND_REQUESTED:        'SEND_REQUESTED',
+
+  // Installation (C.5)
+  INSTALL_STARTED:        'INSTALL_STARTED',
+  INSTALL_COMPLETED:      'INSTALL_COMPLETED',
+  INSTALL_FAILED:         'INSTALL_FAILED',
+  UNINSTALL_COMPLETED:    'UNINSTALL_COMPLETED',
+  REINSTALL_COMPLETED:    'REINSTALL_COMPLETED',
+  COMPATIBILITY_WARNING:  'COMPATIBILITY_WARNING',
 } as const;
 
 export type WidgetEventName = typeof WidgetEvent[keyof typeof WidgetEvent];
@@ -538,6 +546,36 @@ export interface ConversationRestoredPayload { timestamp: string; }
 export interface InputChangedPayload         { timestamp: string; length: number; }
 export interface SendRequestedPayload        { timestamp: string; length: number; }
 
+// ─── C.5 Installation payloads ────────────────────────────────────────────────
+
+export interface InstallStartedPayload {
+  timestamp: string;
+  embedMode: string;
+}
+export interface InstallCompletedPayload {
+  timestamp:  string;
+  embedMode:  string;
+  businessId: string;
+}
+export interface InstallFailedPayload {
+  timestamp: string;
+  reason:    string;
+  error:     string;
+}
+export interface UninstallCompletedPayload {
+  timestamp: string;
+}
+export interface ReinstallCompletedPayload {
+  timestamp:      string;
+  embedMode:      string;
+  reinstallCount: number;
+}
+export interface CompatibilityWarningPayload {
+  timestamp:    string;
+  message:      string;
+  capabilities: import('./integration/types').BrowserCapabilities;
+}
+
 // ─── Event → Payload mapping ──────────────────────────────────────────────────
 
 /**
@@ -632,4 +670,11 @@ export interface EventPayloadMap {
   [WidgetEvent.CONVERSATION_RESTORED]:  ConversationRestoredPayload;
   [WidgetEvent.INPUT_CHANGED]:          InputChangedPayload;
   [WidgetEvent.SEND_REQUESTED]:         SendRequestedPayload;
+  // C.5 installation events
+  [WidgetEvent.INSTALL_STARTED]:       InstallStartedPayload;
+  [WidgetEvent.INSTALL_COMPLETED]:     InstallCompletedPayload;
+  [WidgetEvent.INSTALL_FAILED]:        InstallFailedPayload;
+  [WidgetEvent.UNINSTALL_COMPLETED]:   UninstallCompletedPayload;
+  [WidgetEvent.REINSTALL_COMPLETED]:   ReinstallCompletedPayload;
+  [WidgetEvent.COMPATIBILITY_WARNING]: CompatibilityWarningPayload;
 }

@@ -20,6 +20,7 @@ import type { IRenderer }            from './rendering/types';
 import type { IUIFoundation }        from './ui/types';
 import type { ILauncherController } from './launcher/types';
 import type { IConversationController } from './conversation/types';
+import type { ILifecycleManager, EmbedMode, InstallResult } from './integration/types';
 
 // ─── Widget position ──────────────────────────────────────────────────────────
 
@@ -88,6 +89,8 @@ export interface WidgetRuntime {
   launcher:      ILauncherController | null;
   /** C.4: The Conversation Controller instance owned by this runtime. */
   conversation:  IConversationController | null;
+  /** C.5: The Installation Lifecycle Manager owned by this runtime. */
+  installation:  ILifecycleManager | null;
 }
 
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
@@ -204,6 +207,14 @@ export interface DiagnosticsInfo {
   messageCount:        number;
   minimized:           boolean;
   fullscreen:          boolean;
+
+  // C.5 additions
+  installationStatus:             string;
+  installationTime:               string | null;
+  embedMode:                      string;
+  compatibilityWarnings:          string[];
+  browserCapabilities:            import('./integration/types').BrowserCapabilities;
+  duplicateInstallationPrevented: boolean;
 }
 
 // ─── Public SDK API ──────────────────────────────────────────────────────────
@@ -275,4 +286,13 @@ export interface LeadFlowSDK {
   // C.4
   /** The conversation controller — shell, header, body, composer. */
   conversation: IConversationController | null;
+
+  // C.5
+  /** The installation lifecycle manager. */
+  installation:           ILifecycleManager | null;
+  install:                (embedMode?: EmbedMode) => Promise<InstallResult>;
+  uninstall:              () => void;
+  reinstall:              (embedMode?: EmbedMode) => Promise<InstallResult>;
+  reload:                 () => Promise<InstallResult>;
+  getInstallationStatus:  () => import('./integration/types').InstallationStatus;
 }

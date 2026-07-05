@@ -10,6 +10,7 @@ import { runtime }                             from './runtime';
 import { eventBus }                            from './eventBus';
 import { registry }                            from './registry';
 import { LOG_PREFIX, WINDOW_GLOBAL }           from './constants';
+import { createIntegrationManager }            from './integration/loader';
 import type { LeadFlowSDK, WidgetConfig, InitializationStatus } from './types';
 import type { IWidgetModule }                  from './module';
 import type { TransportAdapter }               from './transport/types';
@@ -111,6 +112,50 @@ const sdk: LeadFlowSDK = {
   // ── C.4 ───────────────────────────────────────────────────────────────────
   get conversation() {
     return runtime.conversation;
+  },
+
+  // ── C.5 ───────────────────────────────────────────────────────────────────
+  get installation() {
+    return runtime.installation;
+  },
+  async install(embedMode) {
+    if (!runtime.installation) {
+      // Not yet initialized — run full init first, then delegate
+      throw new Error('[LeadFlow] install() called before widget is initialized');
+    }
+    return runtime.installation.install(embedMode);
+  },
+  uninstall() {
+    runtime.installation?.uninstall() ?? destroyWidget();
+  },
+  async reinstall(embedMode) {
+    if (!runtime.installation) {
+      if (!runtime.config) throw new Error('[LeadFlow] reinstall() called before widget has ever been initialized');
+      (runtime as unknown as { installation: ReturnType<typeof createIntegrationManager> }).installation =
+        createIntegrationManager(
+          { ...runtime.config, embedMode: 'floating' },
+          initializeWidget,
+          destroyWidget,
+          false
+        );
+    }
+    return runtime.installation!.reinstall(embedMode);
+  },
+  async reload() {
+    if (!runtime.installation) {
+      if (!runtime.config) throw new Error('[LeadFlow] reload() called before widget has ever been initialized');
+      (runtime as unknown as { installation: ReturnType<typeof createIntegrationManager> }).installation =
+        createIntegrationManager(
+          { ...runtime.config, embedMode: 'floating' },
+          initializeWidget,
+          destroyWidget,
+          false
+        );
+    }
+    return runtime.installation!.reload();
+  },
+  getInstallationStatus() {
+    return runtime.installation?.status() ?? 'not-installed';
   },
 };
 

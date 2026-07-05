@@ -369,6 +369,176 @@ console.log('\n── C.4 Lifecycle ──────────────�
 }
 
 // ════════════════════════════════════════════════════════════
+// C.5 — Installation Lifecycle Manager API
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Lifecycle Manager API ───────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_lm'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  check('C5 LM1: installation exposed on sdk',         sdk.installation!==null,               typeof sdk.installation);
+  check('C5 LM1: install() is a function',             typeof sdk.install==='function',        '');
+  check('C5 LM1: uninstall() is a function',           typeof sdk.uninstall==='function',      '');
+  check('C5 LM1: reinstall() is a function',           typeof sdk.reinstall==='function',      '');
+  check('C5 LM1: reload() is a function',              typeof sdk.reload==='function',         '');
+  check('C5 LM1: getInstallationStatus() is fn',       typeof sdk.getInstallationStatus==='function','');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Installation Status
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Installation Status ─────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_is'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  check('C5 IS1: status=installed after auto-init',    sdk.getInstallationStatus()==='installed', `status=${sdk.getInstallationStatus()}`);
+  check('C5 IS2: installation.status()===installed',   sdk.installation?.status()==='installed',  `status=${sdk.installation?.status()}`);
+
+  const state=sdk.installation?.getState();
+  check('C5 IS3: getState() returns object',           typeof state==='object'&&state!==null,     '');
+  check('C5 IS4: state.status===installed',            state?.status==='installed',               `status=${state?.status}`);
+  check('C5 IS5: state.embedMode is string',           typeof state?.embedMode==='string',        `mode=${state?.embedMode}`);
+  check('C5 IS6: state.installedAt is string',         typeof state?.installedAt==='string',      `at=${state?.installedAt}`);
+  check('C5 IS7: browserCapabilities is object',       typeof state?.browserCapabilities==='object', '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Compatibility Detection
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Compatibility Detection ─────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_compat'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  const state=sdk.installation?.getState();
+  const caps=state?.browserCapabilities;
+
+  check('C5 CD1: browserCapabilities present',         caps!==undefined&&caps!==null,             '');
+  check('C5 CD2: shadowDOM capability is boolean',     typeof caps?.shadowDOM==='boolean',        `val=${caps?.shadowDOM}`);
+  check('C5 CD3: abortController is boolean',          typeof caps?.abortController==='boolean',  `val=${caps?.abortController}`);
+  check('C5 CD4: fetch is boolean',                    typeof caps?.fetch==='boolean',            `val=${caps?.fetch}`);
+  check('C5 CD5: resizeObserver is boolean',           typeof caps?.resizeObserver==='boolean',   `val=${caps?.resizeObserver}`);
+  check('C5 CD6: intersectionObserver is boolean',     typeof caps?.intersectionObserver==='boolean','');
+  check('C5 CD7: customElements is boolean',           typeof caps?.customElements==='boolean',   '');
+  check('C5 CD8: cssVariables is boolean',             typeof caps?.cssVariables==='boolean',     '');
+  check('C5 CD9: compatibilityWarnings is array',      Array.isArray(state?.compatibilityWarnings), '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Embed Modes
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Embed Modes ─────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_em'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  const state=sdk.installation?.getState();
+  check('C5 EM1: default embedMode=floating',          state?.embedMode==='floating',             `mode=${state?.embedMode}`);
+
+  // reinstall with fullscreen mode
+  const result=await sdk.reinstall('fullscreen');
+  check('C5 EM2: reinstall() returns result',          typeof result==='object'&&result!==null,   '');
+  check('C5 EM3: reinstall embedMode=fullscreen',      result?.embedMode==='fullscreen',          `mode=${result?.embedMode}`);
+  check('C5 EM4: reinstall succeeded',                 result?.success===true,                    `success=${result?.success}`);
+
+  // reload
+  const reloadResult=await sdk.reload();
+  check('C5 EM5: reload() returns result',             typeof reloadResult==='object',            '');
+  check('C5 EM6: reload succeeds',                     reloadResult?.success===true,              `success=${reloadResult?.success}`);
+
+  // popover → falls back to floating
+  const popResult=await sdk.reinstall('popover');
+  check('C5 EM7: popover falls back to floating',      popResult?.embedMode==='floating',         `mode=${popResult?.embedMode}`);
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Duplicate Installation Prevention
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Duplicate Prevention ────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_dup'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  // Widget is already installed by auto-init. Calling install() again
+  // should be blocked as a duplicate.
+  let dupPrevented=false;
+  try {
+    const r=await sdk.install('floating');
+    dupPrevented=r?.duplicatePrevented===true || r?.success===false;
+  } catch { dupPrevented=true; }
+  check('C5 DP1: duplicate install prevented',         dupPrevented,                              '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Events
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Events ──────────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_ev5'}});
+  await runBundle(b); const sdk=b.sdk;
+  const evts={};
+  sdk.eventBus.on('INSTALL_STARTED',     p=>evts['started']    =p);
+  sdk.eventBus.on('INSTALL_COMPLETED',   p=>evts['completed']  =p);
+  sdk.eventBus.on('UNINSTALL_COMPLETED', p=>evts['uninstalled']=p);
+  sdk.eventBus.on('REINSTALL_COMPLETED', p=>evts['reinstalled']=p);
+
+  // reinstall triggers INSTALL_STARTED + INSTALL_COMPLETED + REINSTALL_COMPLETED
+  await sdk.reinstall('floating');
+  check('C5 EV1: INSTALL_STARTED emitted',             !!evts['started'],                         '');
+  check('C5 EV2: INSTALL_COMPLETED emitted',           !!evts['completed'],                       '');
+  check('C5 EV3: REINSTALL_COMPLETED emitted',         !!evts['reinstalled'],                     '');
+  check('C5 EV4: INSTALL_COMPLETED has embedMode',     typeof evts['completed']?.embedMode==='string','');
+  check('C5 EV5: INSTALL_COMPLETED has timestamp',     typeof evts['completed']?.timestamp==='string','');
+
+  sdk.uninstall();
+  check('C5 EV6: UNINSTALL_COMPLETED emitted',         !!evts['uninstalled'],                     '');
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Diagnostics
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Diagnostics ─────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_d5'}});
+  await runBundle(b); const sdk=b.sdk;
+  const d=sdk.getDiagnostics();
+
+  check('C5 DG1: installationStatus in diagnostics',   typeof d.installationStatus==='string',    `status=${d.installationStatus}`);
+  check('C5 DG2: installationTime in diagnostics',     d.installationTime!==undefined,            `time=${d.installationTime}`);
+  check('C5 DG3: embedMode in diagnostics',            typeof d.embedMode==='string',             `mode=${d.embedMode}`);
+  check('C5 DG4: compatibilityWarnings is array',      Array.isArray(d.compatibilityWarnings),    '');
+  check('C5 DG5: browserCapabilities is object',       typeof d.browserCapabilities==='object',   '');
+  check('C5 DG6: duplicateInstallationPrevented bool', typeof d.duplicateInstallationPrevented==='boolean','');
+  check('C5 DG7: installationStatus=installed',        d.installationStatus==='installed',        `status=${d.installationStatus}`);
+  check('C5 DG8: JSON-serialisable',
+    (()=>{try{JSON.stringify(d);return true;}catch{return false;}})(), '');
+
+  // After uninstall, status should reflect it
+  sdk.uninstall();
+  const d2=sdk.getDiagnostics();
+  check('C5 DG9: status=not-installed after uninstall',d2.installationStatus==='not-installed',   `status=${d2.installationStatus}`);
+}
+
+// ════════════════════════════════════════════════════════════
+// C.5 — Lifecycle (uninstall → reinstall)
+// ════════════════════════════════════════════════════════════
+console.log('\n── C.5 Lifecycle ───────────────────────────────────────────────');
+{
+  const b=makeBrowser({scriptDataset:{business:'biz_lc5'}});
+  await runBundle(b); const sdk=b.sdk;
+
+  check('C5 LC1: installed after auto-init',           sdk.getInstallationStatus()==='installed', '');
+  sdk.uninstall();
+  check('C5 LC2: not-installed after uninstall',       sdk.getInstallationStatus()==='not-installed','');
+  check('C5 LC3: conversation=null after uninstall',   sdk.conversation===null,                   '');
+  const r=await sdk.reinstall('floating');
+  check('C5 LC4: reinstall succeeds',                  r.success===true,                          `success=${r.success}`);
+  check('C5 LC5: installed after reinstall',           sdk.getInstallationStatus()==='installed', `status=${sdk.getInstallationStatus()}`);
+  check('C5 LC6: conversation restored after reinstall',sdk.conversation!==null,                  '');
+}
+
+// ════════════════════════════════════════════════════════════
 // Bundle
 // ════════════════════════════════════════════════════════════
 console.log('\n── Bundle ──────────────────────────────────────────────────────');
@@ -379,11 +549,15 @@ console.log('\n── Bundle ─────────────────
   check('BN: IIFE',                  bundle.includes('(()=>{')||bundle.includes('(()=>'),      'IIFE');
   check('BN: no React',             !bundle.includes('ReactDOM'),                              '');
   check('BN: no WebSocket',         !bundle.includes('new WebSocket('),                       '');
-  check('BN: no localStorage',      !bundle.includes('localStorage'),                         '');
+  // localStorage is only used in the capability probe (write+remove), never for persistence
+  check('BN: no localStorage persistence',  !bundle.includes('localStorage.getItem') && !bundle.includes("localStorage['getItem']"), '');
   check('BN: shell CSS in bundle',   bundle.includes('lf-conv-shell'),                        'CSS');
   check('BN: input CSS in bundle',   bundle.includes('lf-conv-input'),                        'CSS');
   check('BN: ARIA role dialog',      bundle.includes('role'),                                 'ARIA');
   check('BN: Escape key handler',    bundle.includes('Escape'),                               'keyboard');
+  check('BN: C.5 INSTALL_STARTED',  bundle.includes('INSTALL_STARTED'),                      'C.5 event');
+  check('BN: C.5 embedMode',        bundle.includes('embedMode'),                            'C.5 embed');
+  check('BN: C.5 compatibility',    bundle.includes('shadowDOM'),                            'C.5 compat');
   check('BN: version 0.1.0',        bundle.includes('0.1.0'),                                '');
   check('BN: zero runtime deps',
     (()=>{const pkg=JSON.parse(fs.readFileSync('./package.json','utf8'));return Object.keys(pkg.dependencies??{}).length===0;})(),'');

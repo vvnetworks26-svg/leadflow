@@ -22,6 +22,7 @@ import { registry }                      from './registry';
 import { hooks }                         from './hooks';
 import { createLauncherController }      from './launcher/controller';
 import { createConversationController }  from './conversation/controller';
+import { createIntegrationManager }      from './integration/loader';
 import type { WidgetConfig, InitializationStatus } from './types';
 
 // ─── DOM readiness ────────────────────────────────────────────────────────────
@@ -151,6 +152,15 @@ export async function initializeWidget(
     registry.initializeAll(resolvedConfig);
     hooks.run('afterInitialize');
 
+    // C.5: Recreate the installation lifecycle manager (post-mount)
+    (runtime as unknown as { installation: ReturnType<typeof createIntegrationManager> }).installation =
+      createIntegrationManager(
+        { ...resolvedConfig, embedMode: 'floating' },
+        initializeWidget,
+        destroyWidget,
+        true  // alreadyInstalled — widget just mounted successfully
+      );
+
     return 'mounted';
 
   } catch (err) {
@@ -190,6 +200,11 @@ export function destroyWidget(): void {
   runtime.conversation?.destroy();
   (runtime as unknown as { conversation: null }).conversation = null;
 
+  // C.5: destroy installation manager (null it first to break re-entrancy)
+  const installationToDestroy = runtime.installation;
+  (runtime as unknown as { installation: null }).installation = null;
+  installationToDestroy?.destroy();
+
   // C.1: destroy renderer before removing the root element
   runtime.renderer.destroy();
 
@@ -212,6 +227,8 @@ export function destroyWidget(): void {
   });
 
   hooks.run('afterDestroy');
-  eventBus.clear();
   hooks.clear();
+  // Note: eventBus listeners are intentionally preserved across destroy/reinstall
+  // so user-registered listeners remain active. The bus is only cleared when the
+  // SDK is fully torn down with no expectation of reinstall.
 }

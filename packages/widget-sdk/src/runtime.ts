@@ -37,7 +37,7 @@ const TRANSITIONS: Readonly<Record<RuntimeStatus, ReadonlyArray<RuntimeStatus>>>
   [RuntimeState.UNINITIALIZED]: [RuntimeState.INITIALIZING],
   [RuntimeState.INITIALIZING]:  [RuntimeState.READY, RuntimeState.ERROR],
   [RuntimeState.READY]:         [RuntimeState.DESTROYED, RuntimeState.ERROR],
-  [RuntimeState.DESTROYED]:     [RuntimeState.INITIALIZING],
+  [RuntimeState.DESTROYED]:     [RuntimeState.INITIALIZING, RuntimeState.DESTROYED],
   [RuntimeState.ERROR]:         [RuntimeState.INITIALIZING],
 };
 
@@ -63,6 +63,7 @@ export const runtime: WidgetRuntime = {
   ui:            createUIFoundation(),
   launcher:      null,   // created by loader after renderer mounts
   conversation:  null,   // created by loader after renderer mounts
+  installation:  null,   // created by loader after auto-init
 };
 
 // Wire credential headers into transport (avoids circular import)
@@ -109,6 +110,7 @@ export const runtime: WidgetRuntime = {
 
 export function transitionTo(to: RuntimeStatus): void {
   const from    = runtime.status;
+  if (from === to) return; // same-state: no-op
   const allowed = TRANSITIONS[from];
 
   if (!allowed.includes(to)) {
@@ -140,7 +142,8 @@ export function recordError(message: string): void {
 }
 
 export function resetRuntime(): void {
-  runtime.config        = null;
+  // config is intentionally preserved so reinstall() can reuse it after destroy.
+  // rootElement, initializedAt, and lastError are cleared.
   runtime.rootElement   = null;
   runtime.initializedAt = null;
   runtime.lastError     = null;
