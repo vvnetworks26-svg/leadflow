@@ -248,5 +248,19 @@ export function getDiagnostics(): DiagnosticsInfo {
         rollbackAvailable:   dd?.rollbackAvailable   ?? false,
       };
     })(),
+
+    // C.7
+    ...(() => {
+      const bd = runtime.branding?.getDiagnostics();
+      return {
+        brandingEnabled:     bd?.brandingEnabled    ?? false,
+        whiteLabelEnabled:   bd?.whiteLabelEnabled  ?? false,
+        activeBrand:         bd?.activeBrand        ?? 'LeadFlow Chat',
+        activePalette:       bd?.activePalette      ?? '#6366f1',
+        activeTypography:    bd?.activeTypography   ?? 'inherit',
+        logoConfigured:      bd?.logoConfigured     ?? false,
+        avatarConfigured:    bd?.avatarConfigured   ?? false,
+      };
+    })(),
   };
 }

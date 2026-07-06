@@ -138,6 +138,14 @@ export const WidgetEvent = {
   CONFIG_SYNC_COMPLETED:  'CONFIG_SYNC_COMPLETED',
   CONFIG_CHANGED:         'CONFIG_CHANGED',
   CONFIG_ROLLBACK:        'CONFIG_ROLLBACK',
+
+  // Branding (C.7)
+  BRANDING_UPDATED:       'BRANDING_UPDATED',
+  THEME_UPDATED:          'THEME_UPDATED',
+  LOGO_UPDATED:           'LOGO_UPDATED',
+  TYPOGRAPHY_UPDATED:     'TYPOGRAPHY_UPDATED',
+  WHITE_LABEL_ENABLED:    'WHITE_LABEL_ENABLED',
+  WHITE_LABEL_DISABLED:   'WHITE_LABEL_DISABLED',
 } as const;
 
 export type WidgetEventName = typeof WidgetEvent[keyof typeof WidgetEvent];
@@ -609,6 +617,32 @@ export interface ConfigRollbackPayload {
   version:   number;
 }
 
+// ─── C.7 Branding payloads ────────────────────────────────────────────────────
+
+export interface BrandingUpdatedPayload {
+  timestamp:     string;
+  companyName:   string;
+  colorsChanged: boolean;
+  typoChanged:   boolean;
+}
+export interface ThemeUpdatedPayload {
+  timestamp: string;
+  mode:      string;
+}
+export interface LogoUpdatedPayload {
+  timestamp:   string;
+  logoSet:     boolean;
+  avatarSet:   boolean;
+  launcherSet: boolean;
+}
+export interface TypographyUpdatedPayload {
+  timestamp:  string;
+  fontFamily: string;
+  bodySize:   string;
+}
+export interface WhiteLabelEnabledPayload  { timestamp: string; }
+export interface WhiteLabelDisabledPayload { timestamp: string; }
+
 // ─── Event → Payload mapping ──────────────────────────────────────────────────
 
 /**
@@ -716,4 +750,11 @@ export interface EventPayloadMap {
   [WidgetEvent.CONFIG_SYNC_COMPLETED]: ConfigSyncCompletedPayload;
   [WidgetEvent.CONFIG_CHANGED]:        ConfigChangedPayload;
   [WidgetEvent.CONFIG_ROLLBACK]:       ConfigRollbackPayload;
+  // C.7 branding events
+  [WidgetEvent.BRANDING_UPDATED]:      BrandingUpdatedPayload;
+  [WidgetEvent.THEME_UPDATED]:         ThemeUpdatedPayload;
+  [WidgetEvent.LOGO_UPDATED]:          LogoUpdatedPayload;
+  [WidgetEvent.TYPOGRAPHY_UPDATED]:    TypographyUpdatedPayload;
+  [WidgetEvent.WHITE_LABEL_ENABLED]:   WhiteLabelEnabledPayload;
+  [WidgetEvent.WHITE_LABEL_DISABLED]:  WhiteLabelDisabledPayload;
 }

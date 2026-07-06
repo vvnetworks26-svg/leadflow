@@ -22,6 +22,7 @@ import type { ILauncherController } from './launcher/types';
 import type { IConversationController } from './conversation/types';
 import type { ILifecycleManager, EmbedMode, InstallResult } from './integration/types';
 import type { IDashboardController, DashboardConfig, SyncResult as DashboardSyncResult, ObservedState } from './dashboard/types';
+import type { IBrandingController, BrandConfig, ActiveBrand } from './branding/types';
 
 // ─── Widget position ──────────────────────────────────────────────────────────
 
@@ -94,6 +95,8 @@ export interface WidgetRuntime {
   installation:  ILifecycleManager | null;
   /** C.6: The Dashboard Controller owned by this runtime. */
   dashboard:     IDashboardController | null;
+  /** C.7: The Branding Controller owned by this runtime. */
+  branding:      IBrandingController | null;
 }
 
 // ─── Diagnostics ─────────────────────────────────────────────────────────────
@@ -225,6 +228,15 @@ export interface DiagnosticsInfo {
   lastSync:             string | null;
   pendingUpdates:       number;
   rollbackAvailable:    boolean;
+
+  // C.7 additions
+  brandingEnabled:      boolean;
+  whiteLabelEnabled:    boolean;
+  activeBrand:          string;
+  activePalette:        string;
+  activeTypography:     string;
+  logoConfigured:       boolean;
+  avatarConfigured:     boolean;
 }
 
 // ─── Public SDK API ──────────────────────────────────────────────────────────
@@ -314,4 +326,11 @@ export interface LeadFlowSDK {
   pushDashboardConfig:    (config: DashboardConfig) => DashboardSyncResult;
   pullDashboardState:     () => ObservedState;
   rollbackDashboardConfig:() => DashboardSyncResult;
+
+  // C.7
+  /** The branding controller — colors, typography, assets, white label. */
+  branding:              IBrandingController | null;
+  applyBranding:         (config: BrandConfig) => void;
+  resetBranding:         () => void;
+  getActiveBrand:        () => Readonly<ActiveBrand> | null;
 }

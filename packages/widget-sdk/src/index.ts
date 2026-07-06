@@ -151,6 +151,22 @@ const sdk: LeadFlowSDK = {
     if (!runtime.dashboard) throw new Error('[LeadFlow] dashboard not available — call initialize() first');
     return runtime.dashboard.rollback();
   },
+  // ── C.7 ───────────────────────────────────────────────────────────────────
+  get branding() {
+    return runtime.branding;
+  },
+  applyBranding(config) {
+    if (!runtime.branding) throw new Error('[LeadFlow] branding not available — call initialize() first');
+    runtime.branding.apply(config);
+  },
+  resetBranding() {
+    runtime.branding?.reset();
+  },
+  getActiveBrand() {
+    return runtime.branding?.getActiveBrand() ?? null;
+  },
+
+  // ── C.5 (reinstall / reload) ───────────────────────────────────────────
   async reinstall(embedMode) {
     if (!runtime.installation) {
       if (!runtime.config) throw new Error('[LeadFlow] reinstall() called before widget has ever been initialized');

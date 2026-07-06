@@ -24,6 +24,7 @@ import { createLauncherController }      from './launcher/controller';
 import { createConversationController }  from './conversation/controller';
 import { createIntegrationManager }      from './integration/loader';
 import { createDashboardController }     from './dashboard/controller';
+import { createBrandingController }      from './branding/controller';
 import type { WidgetConfig, InitializationStatus } from './types';
 
 // ─── DOM readiness ────────────────────────────────────────────────────────────
@@ -166,6 +167,10 @@ export async function initializeWidget(
     (runtime as unknown as { dashboard: ReturnType<typeof createDashboardController> }).dashboard =
       createDashboardController(runtime, runtime.configuration);
 
+    // C.7: Create branding controller (post-mount)
+    (runtime as unknown as { branding: ReturnType<typeof createBrandingController> }).branding =
+      createBrandingController(runtime.renderer, runtime.ui);
+
     return 'mounted';
 
   } catch (err) {
@@ -213,6 +218,10 @@ export function destroyWidget(): void {
   // C.6: destroy dashboard controller
   runtime.dashboard?.destroy();
   (runtime as unknown as { dashboard: null }).dashboard = null;
+
+  // C.7: destroy branding controller
+  runtime.branding?.destroy();
+  (runtime as unknown as { branding: null }).branding = null;
 
   // C.1: destroy renderer before removing the root element
   runtime.renderer.destroy();
