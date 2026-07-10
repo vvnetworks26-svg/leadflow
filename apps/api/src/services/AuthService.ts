@@ -2,9 +2,11 @@
  * AuthService.ts
  *
  * Authentication business logic.
+ * On register: creates User + Organization + OrganizationMember (owner).
+ * JWT access and refresh tokens now include organizationId for tenant context.
+ *
  * Session lifecycle → SessionService.
  * Audit trail → AuditService (fire-and-forget, never blocks auth flow).
- * Controllers never touch models directly.
  */
 
 import { Request } from 'express';
@@ -13,6 +15,7 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/
 import { ApiError } from '../middleware/errorHandler';
 import { SessionService } from './SessionService';
 import { AuditService } from './AuditService';
+import { OrganizationService } from './OrganizationService';
 import { RegisterDto, LoginDto } from '../dto/auth.dto';
 
 export interface AuthTokens {
@@ -21,8 +24,9 @@ export interface AuthTokens {
 }
 
 export interface AuthResult {
-  user: ReturnType<UserDocument['toJSON']>;
-  tokens: AuthTokens;
+  user:           ReturnType<UserDocument['toJSON']>;
+  tokens:         AuthTokens;
+  organizationId: string;
 }
 
 // ─── Private helpers ──────────────────────────────────────────────────────────
@@ -34,8 +38,14 @@ function getClientMeta(req?: Partial<Request>) {
   };
 }
 
-function issueTokens(user: UserDocument, sessionId: string): AuthTokens {
-  const base = { sub: user.id as string, email: user.email, role: user.role, sid: sessionId };
+function issueTokens(user: UserDocument, sessionId: string, organizationId: string): AuthTokens {
+  const base = {
+    sub:            user.id as string,
+    email:          user.email,
+    role:           user.role,
+    organizationId,
+    sid:            sessionId,
+  };
   return {
     accessToken:  signAccessToken(base),
     refreshToken: signRefreshToken(base),
@@ -45,7 +55,11 @@ function issueTokens(user: UserDocument, sessionId: string): AuthTokens {
 // ─── Public service ───────────────────────────────────────────────────────────
 
 export const AuthService = {
-  /** Register a new user and create an initial session. */
+  /**
+   * Register a new user.
+   * Creates: User → Organization (named after user) → OrganizationMember (owner).
+   * Seeds default business config via OrganizationService.create().
+   */
   async register(dto: RegisterDto, req?: Partial<Request>): Promise<AuthResult> {
     const existing = await UserModel.findOne({ email: dto.email });
     if (existing) throw new ApiError(409, 'Email already registered', 'EMAIL_TAKEN');
@@ -59,6 +73,14 @@ export const AuthService = {
     });
     await user.save();
 
+    // Create the organization (this also seeds default data)
+    const orgName = dto.organizationName ?? `${dto.firstName} ${dto.lastName}'s Organization`;
+    const org     = await OrganizationService.create(orgName);
+    const orgId   = org.id as string;
+
+    // Assign the user as owner of the new organization
+    await OrganizationService.addMember(orgId, user.id as string, 'owner');
+
     const meta = getClientMeta(req);
 
     const placeholderRt = 'placeholder-' + user.id;
@@ -68,27 +90,41 @@ export const AuthService = {
       ...meta,
     });
 
-    const tokens = issueTokens(user, sessionId);
+    const tokens = issueTokens(user, sessionId, orgId);
     await SessionService.rotate(sessionId, tokens.refreshToken);
 
     // ── Audit ──────────────────────────────────────────────────────────────
     AuditService.logRegister({
-      userId:    user.id as string,
+      userId:         user.id as string,
+      organizationId: orgId,
       sessionId,
       ...meta,
-      metadata:  { email: user.email, role: user.role },
+      metadata: { email: user.email, role: user.role },
     });
 
-    return { user: user.toJSON(), tokens };
+    // Fire workflow engine for user_registered trigger (fire-and-forget)
+    try {
+      const { WorkflowEngine } = require('../automation/engine/WorkflowEngine');
+      WorkflowEngine.trigger('user_registered', orgId, {
+        userId:    user.id,
+        email:     user.email,
+        firstName: dto.firstName,
+        lastName:  dto.lastName,
+      });
+    } catch { /* non-blocking */ }
+
+    return { user: user.toJSON(), tokens, organizationId: orgId };
   },
 
-  /** Login, verify credentials, and create a new session. */
+  /**
+   * Login, verify credentials, and create a new session.
+   * Resolves the user's organization from their membership record.
+   */
   async login(dto: LoginDto, req?: Partial<Request>): Promise<AuthResult> {
     const meta = getClientMeta(req);
     const user = await UserModel.findOne({ email: dto.email }).select('+passwordHash');
 
     if (!user) {
-      // ── Audit: failed login (unknown email) ────────────────────────────
       AuditService.logFailedLogin({
         ...meta,
         metadata: { reason: 'User not found', email: dto.email },
@@ -98,13 +134,18 @@ export const AuthService = {
 
     const valid = await user.comparePassword(dto.password);
     if (!valid) {
-      // ── Audit: failed login (wrong password) ───────────────────────────
       AuditService.logFailedLogin({
         userId: user.id as string,
         ...meta,
         metadata: { reason: 'Invalid password' },
       });
       throw new ApiError(401, 'Invalid email or password', 'INVALID_CREDENTIALS');
+    }
+
+    // Resolve organization from membership
+    const orgId = await OrganizationService.findOrganizationForUser(user.id as string);
+    if (!orgId) {
+      throw new ApiError(403, 'User is not a member of any organization', 'NO_ORGANIZATION');
     }
 
     const placeholderRt = 'placeholder-' + user.id + '-' + Date.now();
@@ -114,23 +155,22 @@ export const AuthService = {
       ...meta,
     });
 
-    const tokens = issueTokens(user, sessionId);
+    const tokens = issueTokens(user, sessionId, orgId);
     await SessionService.rotate(sessionId, tokens.refreshToken);
 
-    // ── Audit: successful login ────────────────────────────────────────
     AuditService.logLogin({
-      userId:    user.id as string,
+      userId:         user.id as string,
+      organizationId: orgId,
       sessionId,
       ...meta,
-      metadata:  { email: user.email },
+      metadata: { email: user.email },
     });
 
-    return { user: user.toJSON(), tokens };
+    return { user: user.toJSON(), tokens, organizationId: orgId };
   },
 
   /**
    * Logout — revoke only the current session.
-   * Works even when the access token has expired.
    * Silent on invalid/expired tokens.
    */
   async logout(incomingRefreshToken: string, req?: Partial<Request>): Promise<void> {
@@ -150,17 +190,18 @@ export const AuthService = {
 
     await SessionService.revoke(payload.sid);
 
-    // ── Audit ──────────────────────────────────────────────────────────────
     AuditService.logLogout({
-      userId:    payload.sub,
-      sessionId: payload.sid,
+      userId:         payload.sub,
+      organizationId: payload.organizationId,
+      sessionId:      payload.sid,
       ...meta,
     });
   },
 
   /**
    * Refresh tokens.
-   * Detects reuse via SessionService.verify (which auto-revokes on breach).
+   * Detects reuse via SessionService.verify (auto-revokes on breach).
+   * Preserves the organizationId from the original refresh token.
    */
   async refresh(incomingRefreshToken: string, req?: Partial<Request>): Promise<AuthTokens> {
     const meta = getClientMeta(req);
@@ -175,20 +216,20 @@ export const AuthService = {
     try {
       await SessionService.verify(payload.sid, incomingRefreshToken);
     } catch (err: any) {
-      // Token reuse detected by SessionService — emit security audit
       if (err?.code === 'TOKEN_REUSE') {
         AuditService.logTokenReuse({
-          userId:    payload.sub,
-          sessionId: payload.sid,
+          userId:         payload.sub,
+          organizationId: payload.organizationId,
+          sessionId:      payload.sid,
           ...meta,
-          metadata:  { reason: 'Hash mismatch — session auto-revoked' },
+          metadata: { reason: 'Hash mismatch — session auto-revoked' },
         });
-        // Also log the session revocation
         AuditService.logSessionRevoked({
-          userId:    payload.sub,
-          sessionId: payload.sid,
+          userId:         payload.sub,
+          organizationId: payload.organizationId,
+          sessionId:      payload.sid,
           ...meta,
-          metadata:  { trigger: 'TOKEN_REUSE' },
+          metadata: { trigger: 'TOKEN_REUSE' },
         });
       }
       throw err;
@@ -197,15 +238,15 @@ export const AuthService = {
     const user = await UserModel.findById(payload.sub);
     if (!user) throw new ApiError(401, 'User not found', 'USER_NOT_FOUND');
 
-    const tokens = issueTokens(user, payload.sid);
+    const tokens = issueTokens(user, payload.sid, payload.organizationId);
     await SessionService.rotate(payload.sid, tokens.refreshToken);
 
-    // ── Audit ──────────────────────────────────────────────────────────────
     AuditService.logRefresh({
-      userId:    payload.sub,
-      sessionId: payload.sid,
+      userId:         payload.sub,
+      organizationId: payload.organizationId,
+      sessionId:      payload.sid,
       ...meta,
-      metadata:  { refreshRotation: true },
+      metadata: { refreshRotation: true },
     });
 
     return tokens;

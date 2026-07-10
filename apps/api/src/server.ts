@@ -6,12 +6,27 @@ import { createApp } from './app';
 import { env } from './config/env';
 import { connectDatabase, disconnectDatabase, isDatabaseConnected } from './config/database';
 import { logger } from './utils/logger';
+import { ReminderService }         from './calendar/reminders/ReminderService';
+import { WorkflowScheduler }       from './automation/scheduler/WorkflowScheduler';
+import { WorkflowTemplateService } from './automation/templates/WorkflowTemplateService';
+import { ThemeService }            from './widget/themes/ThemeService';
+import { startHeartbeat }          from './dashboard/realtime/SseService';
+import { MarketplaceService }      from './platform/marketplace/MarketplaceService';
 
 async function start(): Promise<void> {
-  // Attempt DB connection — server starts regardless (MONGODB_URI may be empty in dev)
   await connectDatabase().catch(err => {
     logger.warn({ err }, 'Server starting without database connection');
   });
+
+  // Start background jobs
+  ReminderService.startCronJob();
+  WorkflowScheduler.startCronJobs();
+  startHeartbeat();
+
+  // Seed system data (idempotent)
+  WorkflowTemplateService.seedSystemTemplates().catch(() => {});
+  ThemeService.seedSystemThemes().catch(() => {});
+  MarketplaceService.seedSystemApps().catch(() => {});
 
   const app = createApp();
 

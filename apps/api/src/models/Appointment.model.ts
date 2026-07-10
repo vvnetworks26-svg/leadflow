@@ -1,10 +1,13 @@
 import { Schema, model, Document } from 'mongoose';
 import { Appointment } from '../types';
 
-export interface AppointmentDocument extends Omit<Appointment, 'id'>, Document {}
+export interface AppointmentDocument extends Omit<Appointment, 'id'>, Document {
+  organizationId: string;
+}
 
 const AppointmentSchema = new Schema<AppointmentDocument>(
   {
+    organizationId:       { type: String, required: true, index: true },
     leadId:               { type: String, required: true },
     leadName:             { type: String, required: true },
     leadPhone:            { type: String, required: true },
@@ -36,5 +39,10 @@ const AppointmentSchema = new Schema<AppointmentDocument>(
     },
   }
 );
+
+// ─── Multi-tenant indexes ─────────────────────────────────────────────────────
+AppointmentSchema.index({ organizationId: 1, createdAt: -1 });
+AppointmentSchema.index({ organizationId: 1, status: 1 });
+AppointmentSchema.index({ organizationId: 1, leadId: 1 });
 
 export const AppointmentModel = model<AppointmentDocument>('Appointment', AppointmentSchema);

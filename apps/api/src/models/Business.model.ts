@@ -1,7 +1,17 @@
+/**
+ * Business.model.ts
+ *
+ * Organization-level business configuration (hours, services, AI, team, etc.)
+ * Each organization has exactly one Business settings document.
+ * All queries MUST filter by organizationId.
+ */
+
 import { Schema, model, Document } from 'mongoose';
 import { BusinessSettings } from '../types';
 
-export interface BusinessDocument extends Omit<BusinessSettings, 'id'>, Document {}
+export interface BusinessDocument extends Omit<BusinessSettings, 'id'>, Document {
+  organizationId: string;
+}
 
 const DayScheduleSchema = new Schema(
   { isOpen: Boolean, openTime: String, closeTime: String },
@@ -25,6 +35,8 @@ const FaqItemSchema = new Schema(
 
 const BusinessSchema = new Schema<BusinessDocument>(
   {
+    organizationId: { type: String, required: true, unique: true, index: true },
+
     // Profile
     companyName:  { type: String, required: true },
     logoUrl:      { type: String, default: '' },
