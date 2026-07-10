@@ -76,6 +76,25 @@ export const env = {
   CORS_ORIGINS:           optional('CORS_ORIGINS',           'http://localhost:3000'),
   LOG_LEVEL:              optional('LOG_LEVEL',              'info'),
 
+  // AI — optional; if absent the AI engine uses rule-based fallbacks
+  GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
+
+  // Google Calendar OAuth (optional)
+  GOOGLE_CLIENT_ID:     optional('GOOGLE_CLIENT_ID',     ''),
+  GOOGLE_CLIENT_SECRET: optional('GOOGLE_CLIENT_SECRET', ''),
+  GOOGLE_REDIRECT_URI:  optional('GOOGLE_REDIRECT_URI',  'http://localhost:4000/api/v1/calendar/oauth/google/callback'),
+
+  // Microsoft 365 OAuth (optional)
+  MS_CLIENT_ID:     optional('MS_CLIENT_ID',     ''),
+  MS_CLIENT_SECRET: optional('MS_CLIENT_SECRET', ''),
+
+  // Communications (optional)
+  RESEND_API_KEY:       optional('RESEND_API_KEY',       ''),
+  TWILIO_ACCOUNT_SID:   optional('TWILIO_ACCOUNT_SID',   ''),
+  TWILIO_AUTH_TOKEN:    optional('TWILIO_AUTH_TOKEN',     ''),
+  META_WA_PHONE_ID:     optional('META_WA_PHONE_ID',     ''),
+  META_WA_TOKEN:        optional('META_WA_TOKEN',         ''),
+
   // Helpers
   get isDev():  boolean { return this.NODE_ENV === 'development'; },
   get isProd(): boolean { return this.NODE_ENV === 'production'; },

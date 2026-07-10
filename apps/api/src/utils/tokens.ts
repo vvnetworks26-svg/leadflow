@@ -2,8 +2,9 @@
  * tokens.ts — JWT sign / verify utilities.
  *
  * Every token includes:
- *   jti — unique UUID per token (prevents same-second duplicates)
- *   sid — sessionId (UUID) linking the token to a Session document
+ *   jti            — unique UUID per token (prevents same-second duplicates)
+ *   sid            — sessionId linking the token to a Session document
+ *   organizationId — the organization the user is operating in
  */
 
 import jwt, { SignOptions, VerifyOptions } from 'jsonwebtoken';
@@ -12,12 +13,13 @@ import { jwtConfig } from '../config/jwt';
 import { ApiError } from '../middleware/errorHandler';
 
 export interface TokenPayload {
-  sub:   string;           // userId
-  email: string;
-  role:  string;
-  type:  'access' | 'refresh';
-  jti:   string;           // unique token ID
-  sid:   string;           // sessionId
+  sub:            string;          // userId
+  email:          string;
+  role:           string;
+  organizationId: string;          // tenant context
+  type:           'access' | 'refresh';
+  jti:            string;          // unique token ID
+  sid:            string;          // sessionId
 }
 
 // ─── Sign ─────────────────────────────────────────────────────────────────────

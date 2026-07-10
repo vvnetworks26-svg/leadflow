@@ -1,7 +1,8 @@
 import { Schema, model, Document } from 'mongoose';
 import bcrypt from 'bcryptjs';
 
-export type UserRole = 'owner' | 'admin' | 'technician';
+// Expanded role set for multi-tenant org membership
+export type UserRole = 'owner' | 'admin' | 'manager' | 'agent' | 'viewer';
 
 export interface IUser {
   id: string;
@@ -27,7 +28,7 @@ const UserSchema = new Schema<UserDocument>(
     lastName:     { type: String, required: true, trim: true },
     email:        { type: String, required: true, unique: true, lowercase: true, trim: true },
     passwordHash: { type: String, required: true },
-    role:         { type: String, enum: ['owner', 'admin', 'technician'], default: 'owner' },
+    role:         { type: String, enum: ['owner','admin','manager','agent','viewer'], default: 'owner' },
   },
   {
     timestamps: true,

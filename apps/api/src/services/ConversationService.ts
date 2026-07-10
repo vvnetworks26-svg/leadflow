@@ -9,12 +9,12 @@ function makeId(): string {
 }
 
 export const ConversationService = {
-  async list(q: ConversationQueryDto): Promise<PaginatedResult<Conversation>> {
+  async list(organizationId: string, q: ConversationQueryDto): Promise<PaginatedResult<Conversation>> {
     const page  = q.page  ?? 1;
     const limit = q.limit ?? 20;
     const skip  = (page - 1) * limit;
 
-    const filter: Record<string, unknown> = {};
+    const filter: Record<string, unknown> = { organizationId };
     if (q.status) filter.status = q.status;
     if (q.leadId) filter.leadId = q.leadId;
     if (q.search) {
@@ -33,28 +33,33 @@ export const ConversationService = {
     return paginated(docs.map(d => d.toJSON() as unknown as Conversation), total, { page, limit, skip });
   },
 
-  async getById(id: string): Promise<Conversation> {
-    const doc = await ConversationModel.findById(id);
+  async getById(organizationId: string, id: string): Promise<Conversation> {
+    const doc = await ConversationModel.findOne({ _id: id, organizationId });
     if (!doc) throw new ApiError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     return doc.toJSON() as unknown as Conversation;
   },
 
-  async create(dto: CreateConversationDto): Promise<Conversation> {
+  async create(organizationId: string, dto: CreateConversationDto): Promise<Conversation> {
     const doc = await ConversationModel.create({
       ...dto,
+      organizationId,
       lastMessageAt: dto.lastMessageAt ?? new Date().toISOString(),
     });
     return doc.toJSON() as unknown as Conversation;
   },
 
-  async update(id: string, dto: UpdateConversationDto): Promise<Conversation> {
-    const doc = await ConversationModel.findByIdAndUpdate(id, dto, { new: true, runValidators: true });
+  async update(organizationId: string, id: string, dto: UpdateConversationDto): Promise<Conversation> {
+    const doc = await ConversationModel.findOneAndUpdate(
+      { _id: id, organizationId },
+      dto,
+      { new: true, runValidators: true }
+    );
     if (!doc) throw new ApiError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
     return doc.toJSON() as unknown as Conversation;
   },
 
-  async addMessage(id: string, dto: AddMessageDto): Promise<Message> {
-    const doc = await ConversationModel.findById(id);
+  async addMessage(organizationId: string, id: string, dto: AddMessageDto): Promise<Message> {
+    const doc = await ConversationModel.findOne({ _id: id, organizationId });
     if (!doc) throw new ApiError(404, 'Conversation not found', 'CONVERSATION_NOT_FOUND');
 
     const msg: Message = {
@@ -68,5 +73,10 @@ export const ConversationService = {
     doc.lastMessageAt = msg.timestamp;
     await doc.save();
     return msg;
+  },
+
+  /** Count conversations for an organization. */
+  async countByOrganization(organizationId: string): Promise<number> {
+    return ConversationModel.countDocuments({ organizationId });
   },
 };

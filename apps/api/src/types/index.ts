@@ -12,6 +12,10 @@ export type LeadStatus =
   | 'Proposal' | 'Closed Won' | 'Closed Lost';
 
 export type LeadPriority = 'Low' | 'Medium' | 'High';
+export type LeadTemperature = 'Hot' | 'Warm' | 'Cold' | 'Disqualified';
+export type LifecycleStage =
+  | 'subscriber' | 'lead' | 'marketing_qualified' | 'sales_qualified'
+  | 'opportunity' | 'customer' | 'evangelist' | 'other';
 
 export interface Lead {
   id: string;
@@ -20,19 +24,44 @@ export interface Lead {
   phone: string;
   address: string;
   zipCode?: string;
+  company?: string;
+  jobTitle?: string;
+  pipelineId?: string | null;
+  stageId?: string | null;
+  stageName?: string | null;
   status: LeadStatus;
   priority: LeadPriority;
+  temperature?: LeadTemperature;
+  lifecycleStage?: LifecycleStage;
+  score?: number;
   value: number;
+  estimatedValue?: number;
+  expectedCloseDate?: string | null;
+  wonDate?: string | null;
+  lostReason?: string | null;
   source: string;
+  ownerId?: string | null;
+  tags?: string[];
+  lastContactAt?: string | null;
+  nextFollowUpAt?: string | null;
+  activityCount?: number;
+  taskCount?: number;
   hvacNeed: string;
   emergency?: boolean;
   conversationId?: string;
   qualificationReason?: string;
   preferredDay?: string;
   appointmentId?: string;
+  notes: string;
+  aiSummary?: string | null;
+  conversationSummary?: string | null;
+  winProbability?: number | null;
+  riskScore?: number | null;
+  duplicateOfId?: string | null;
+  mergedIds?: string[];
+  customFields?: Record<string, unknown>;
   createdAt: string;
   updatedAt?: string;
-  notes: string;
 }
 
 // ─── Appointment ─────────────────────────────────────────────────────────────

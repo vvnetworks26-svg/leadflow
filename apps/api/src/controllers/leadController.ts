@@ -6,36 +6,36 @@ import { parseQuery } from '../utils/validate';
 
 export async function list(req: Request, res: Response, next: NextFunction) {
   try {
-    const q = parseQuery(LeadQuerySchema, req.query);
-    const result = await LeadService.list(q);
+    const q      = parseQuery(LeadQuerySchema, req.query);
+    const result = await LeadService.list(req.organizationId!, q);
     res.json({ status: 'ok', ...result });
   } catch (e) { next(e); }
 }
 
 export async function getById(req: Request, res: Response, next: NextFunction) {
   try {
-    const lead = await LeadService.getById(param(req.params.id));
+    const lead = await LeadService.getById(req.organizationId!, param(req.params.id));
     res.json({ status: 'ok', data: lead });
   } catch (e) { next(e); }
 }
 
 export async function create(req: Request, res: Response, next: NextFunction) {
   try {
-    const lead = await LeadService.create(req.body);
+    const lead = await LeadService.create(req.organizationId!, req.body);
     res.status(201).json({ status: 'ok', data: lead });
   } catch (e) { next(e); }
 }
 
 export async function update(req: Request, res: Response, next: NextFunction) {
   try {
-    const lead = await LeadService.update(param(req.params.id), req.body);
+    const lead = await LeadService.update(req.organizationId!, param(req.params.id), req.body);
     res.json({ status: 'ok', data: lead });
   } catch (e) { next(e); }
 }
 
 export async function remove(req: Request, res: Response, next: NextFunction) {
   try {
-    await LeadService.delete(param(req.params.id));
+    await LeadService.delete(req.organizationId!, param(req.params.id));
     res.status(204).send();
   } catch (e) { next(e); }
 }
