@@ -119,7 +119,7 @@ const mockProvider: ICalendarProvider = {
     const confirmationNumber = generateConfirmationNumber();
 
     const apt = await appointmentsApi.create({
-      leadId: params.leadId ?? '',
+      leadId: params.leadId ?? 'pending',
       leadName: params.customerName,
       leadPhone: params.phone,
       customerEmail: params.email,

@@ -422,7 +422,7 @@ async function persistLeadOnly(
 
     const conv = await conversationsApi.create({
       leadName: data.name ?? 'Unknown',
-      leadPhone: data.phone ?? '',
+      leadPhone: data.phone && data.phone.length >= 7 ? data.phone : '0000000',
       leadEmail: data.email,
       hvacNeed: data.service,
       status: 'completed',
@@ -432,7 +432,7 @@ async function persistLeadOnly(
 
     const lead = await leadsApi.create({
       name: data.name ?? 'Unknown',
-      phone: data.phone ?? '',
+      phone: data.phone && data.phone.length >= 7 ? data.phone : '0000000',
       email: data.email ?? '',
       zipCode: data.zipCode,
       address: data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
