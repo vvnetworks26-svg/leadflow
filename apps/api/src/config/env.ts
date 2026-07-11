@@ -95,6 +95,9 @@ export const env = {
   META_WA_PHONE_ID:     optional('META_WA_PHONE_ID',     ''),
   META_WA_TOKEN:        optional('META_WA_TOKEN',         ''),
 
+  // AI embeddings (optional — falls back to local mock if absent)
+  OPENAI_API_KEY:       optional('OPENAI_API_KEY',        ''),
+
   // Helpers
   get isDev():  boolean { return this.NODE_ENV === 'development'; },
   get isProd(): boolean { return this.NODE_ENV === 'production'; },

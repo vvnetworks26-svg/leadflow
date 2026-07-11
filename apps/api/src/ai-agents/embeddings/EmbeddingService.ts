@@ -103,8 +103,8 @@ const embeddingCache = new Map<string, number[]>();
 const CACHE_MAX = 2000;
 
 export function getEmbeddingProvider(provider = 'auto'): IEmbeddingProvider {
-  if (provider === 'openai' && (env as any).OPENAI_API_KEY) {
-    return new OpenAIEmbeddingProvider((env as any).OPENAI_API_KEY);
+  if (provider === 'openai' && env.OPENAI_API_KEY) {
+    return new OpenAIEmbeddingProvider(env.OPENAI_API_KEY);
   }
   if (env.GEMINI_API_KEY && (provider === 'gemini' || provider === 'auto')) {
     return new GeminiEmbeddingProvider();

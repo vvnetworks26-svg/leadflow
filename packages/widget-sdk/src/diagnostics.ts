@@ -26,11 +26,12 @@ let _eventCount = 0;
 
 export function wireEventCounter(): void {
   const originalEmit = eventBus.emit.bind(eventBus);
-  (eventBus as unknown as Record<string, unknown>)['emit'] = function <
-    E extends Parameters<typeof originalEmit>[0]
-  >(event: E, payload: Parameters<typeof originalEmit<E>>[1]) {
+  (eventBus as unknown as Record<string, unknown>)['emit'] = function (
+    event: Parameters<typeof originalEmit>[0],
+    payload: Parameters<typeof originalEmit>[1]
+  ) {
     _eventCount++;
-    return originalEmit(event, payload);
+    return originalEmit(event, payload as any);
   };
 }
 
