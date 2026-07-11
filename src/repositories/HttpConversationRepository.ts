@@ -27,7 +27,7 @@ export class HttpConversationRepository implements IConversationRepository {
   }
 
   async fetchAll(): Promise<Conversation[]> {
-    const res = await apiClient.get<{ data: Conversation[] }>('/conversations?limit=200');
+    const res = await apiClient.get<{ data: Conversation[] }>('/conversations?limit=100');
     this.cache = res.data.data;
     this.loaded = true;
     return this.cache;

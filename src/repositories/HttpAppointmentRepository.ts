@@ -27,7 +27,7 @@ export class HttpAppointmentRepository implements IAppointmentRepository {
   }
 
   async fetchAll(): Promise<Appointment[]> {
-    const res = await apiClient.get<{ data: Appointment[] }>('/appointments?limit=200');
+    const res = await apiClient.get<{ data: Appointment[] }>('/appointments?limit=100');
     this.cache = res.data.data;
     this.loaded = true;
     return this.cache;

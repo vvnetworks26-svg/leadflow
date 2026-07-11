@@ -22,7 +22,7 @@ export class HttpLeadRepository implements ILeadRepository {
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    const res = await apiClient.get<{ data: Lead[]; meta: unknown }>('/leads?limit=200');
+    const res = await apiClient.get<{ data: Lead[]; meta: unknown }>('/leads?limit=100');
     this.cache = res.data.data ?? res.data as unknown as Lead[];
     this.loaded = true;
   }
@@ -57,7 +57,7 @@ export class HttpLeadRepository implements ILeadRepository {
   // ── Async helpers used by leadsApi ──────────────────────────────────────────
 
   async fetchAll(): Promise<Lead[]> {
-    const res = await apiClient.get<{ data: Lead[] }>('/leads?limit=200');
+    const res = await apiClient.get<{ data: Lead[] }>('/leads?limit=100');
     this.cache = res.data.data;
     this.loaded = true;
     return this.cache;
