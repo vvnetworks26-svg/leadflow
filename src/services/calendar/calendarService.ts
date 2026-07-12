@@ -118,8 +118,15 @@ const mockProvider: ICalendarProvider = {
     const duration = params.duration ?? estimateDuration(params.service, params.emergency);
     const confirmationNumber = generateConfirmationNumber();
 
+    if (!params.leadId) {
+      throw new Error(
+        '[calendarService] bookAppointment requires a leadId. ' +
+        'Create the lead first and pass lead.id to BookParams.'
+      );
+    }
+
     const apt = await appointmentsApi.create({
-      leadId: params.leadId ?? 'pending',
+      leadId: params.leadId,
       leadName: params.customerName,
       leadPhone: params.phone,
       customerEmail: params.email,
