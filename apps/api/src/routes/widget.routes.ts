@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getWidgetConfig, widgetCreateLead, widgetCreateConversation, widgetChat } from '../controllers/widgetController';
+import { getWidgetConfig, widgetCreateLead, widgetCreateConversation, widgetChat, widgetBook } from '../controllers/widgetController';
 
 const router = Router();
 
@@ -28,5 +28,6 @@ router.get('/:token/config',         getWidgetConfig);
 router.post('/:token/leads',         widgetCreateLead);
 router.post('/:token/conversations', widgetCreateConversation);
 router.post('/:token/chat',          widgetChat);
+router.post('/:token/book',          widgetBook);
 
 export default router;

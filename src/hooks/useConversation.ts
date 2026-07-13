@@ -9,12 +9,10 @@ import {
 } from '../types';
 import { chatApi, formatPhone } from '../services/api/chat';
 import { qualifyLead, estimateDealValue } from '../services/qualification';
-import { conversationsApi } from '../services/api/conversations';
-import { leadsApi } from '../services/api/leads';
+import { widgetApiClient } from '../services/api/widgetApiClient';
 import { calendarService } from '../services/calendar/calendarService';
 import { notificationService } from '../services/notifications/notificationService';
 import { businessSettings } from '../services/business/businessSettings';
-
 const TYPING_DELAY_MS = 800;
 
 function makeId(): string {
@@ -330,70 +328,59 @@ async function persistBooking(
     const qualification = qualifyLead(data);
     const value = estimateDealValue(data.service ?? '', data.emergency ?? false);
 
-    // 1. Persist conversation
-    const convMessages = state.messages.map(m => ({
-      id: m.id,
-      sender: m.sender as 'ai' | 'user',
-      text: m.text,
-      timestamp: m.timestamp.toISOString()
+    // Serialize chat messages for the server
+    const messages = state.messages.map(m => ({
+      id:        m.id,
+      sender:    m.sender as 'ai' | 'user' | 'agent',
+      text:      m.text,
+      timestamp: m.timestamp.toISOString(),
     }));
-    const conv = await conversationsApi.create({
-      leadName: data.name ?? 'Unknown',
-      leadPhone: data.phone ?? '',
-      leadEmail: data.email,
-      hvacNeed: data.service,
-      status: 'completed',
-      lastMessageAt: new Date().toISOString(),
-      messages: convMessages
-    });
 
-    // 2. Create lead
-    const lead = await leadsApi.create({
-      name: data.name ?? 'Unknown',
-      phone: data.phone ?? '',
-      email: data.email ?? '',
-      zipCode: data.zipCode,
-      address: data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
-      status: qualification.status,
-      priority: qualification.priority,
-      value,
-      source: 'AI Chat',
-      hvacNeed: data.service ?? 'General inquiry',
-      emergency: data.emergency ?? false,
-      conversationId: conv.id,
+    // Single public widget endpoint — creates conversation + lead + appointment
+    // atomically server-side. No JWT required.
+    const booking = await widgetApiClient.book({
+      customerName:        data.name ?? 'Unknown',
+      phone:               data.phone ?? '',
+      email:               data.email,
+      address:             data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
+      zipCode:             data.zipCode,
+      service:             data.service ?? 'General HVAC Service',
+      emergency:           data.emergency ?? false,
+      date:                slot.date,
+      time:                slot.time,
+      displayDate:         slot.displayDate,
+      displayTime:         slot.displayTime,
+      duration:            60,
+      preferredDay:        data.preferredDay,
       qualificationReason: qualification.reason,
-      preferredDay: data.preferredDay,
-      notes: `Captured via AI chat. ${qualification.reason}`
+      status:              qualification.status,
+      priority:            qualification.priority,
+      value,
+      notes:               `Captured via AI chat. ${qualification.reason}`,
+      messages,
     });
 
-    // 3. Book appointment via calendar service
-    const confirmation = await calendarService.bookAppointment({
-      slot,
-      customerName: data.name ?? 'Unknown',
-      phone: data.phone ?? '',
-      email: data.email,
-      address: data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
-      zipCode: data.zipCode,
-      service: data.service ?? 'General HVAC Service',
-      emergency: data.emergency ?? false,
-      conversationId: conv.id,
-      leadId: lead.id,
-      notes: `Customer preferred day: ${data.preferredDay ?? 'flexible'}.`
-    });
+    const confirmation: BookingConfirmation = {
+      appointmentId:     booking.appointmentId,
+      confirmationNumber:booking.confirmationNumber,
+      customerName:      booking.customerName,
+      service:           booking.service,
+      date:              booking.date,
+      time:              booking.time,
+      displayDate:       booking.displayDate,
+      displayTime:       booking.displayTime,
+      estimatedDuration: booking.estimatedDuration,
+      address:           booking.address,
+    };
 
-    // 4. Link everything
-    await conversationsApi.linkLead(conv.id, lead.id);
-    await leadsApi.update(lead.id, { appointmentId: confirmation.appointmentId });
-
-    // 5. Fire notifications
     notificationService.sendConfirmation(confirmation);
 
     setState(s => ({
       ...s,
-      conversationId: conv.id,
-      leadId: lead.id,
-      appointmentId: confirmation.appointmentId,
-      data: { ...s.data, bookingConfirmation: confirmation }
+      conversationId: booking.conversationId,
+      leadId:         booking.leadId,
+      appointmentId:  booking.appointmentId,
+      data:           { ...s.data, bookingConfirmation: confirmation },
     }));
 
     return confirmation;
@@ -420,35 +407,35 @@ async function persistLeadOnly(
       timestamp: m.timestamp.toISOString()
     }));
 
-    const conv = await conversationsApi.create({
-      leadName: data.name ?? 'Unknown',
-      leadPhone: data.phone ?? '',
-      leadEmail: data.email,
-      hvacNeed: data.service,
-      status: 'completed',
+    // Use public widget endpoint — no JWT required
+    const conv = await widgetApiClient.createConversation({
+      leadName:      data.name ?? 'Unknown',
+      leadPhone:     data.phone ?? '',
+      leadEmail:     data.email,
+      hvacNeed:      data.service,
+      status:        'completed',
       lastMessageAt: new Date().toISOString(),
-      messages: convMessages
+      messages:      convMessages
     });
 
-    const lead = await leadsApi.create({
-      name: data.name ?? 'Unknown',
-      phone: data.phone ?? '',
-      email: data.email ?? '',
-      zipCode: data.zipCode,
-      address: data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
-      status: qualification.status,
-      priority: qualification.priority,
+    const lead = await widgetApiClient.createLead({
+      name:                data.name ?? 'Unknown',
+      phone:               data.phone ?? '',
+      email:               data.email ?? '',
+      zipCode:             data.zipCode,
+      address:             data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
+      status:              qualification.status,
+      priority:            qualification.priority,
       value,
-      source: 'AI Chat',
-      hvacNeed: data.service ?? 'General inquiry',
-      emergency: data.emergency ?? false,
-      conversationId: conv.id,
+      source:              'AI Chat',
+      hvacNeed:            data.service ?? 'General inquiry',
+      emergency:           data.emergency ?? false,
+      conversationId:      conv.id,
       qualificationReason: qualification.reason,
-      preferredDay: data.preferredDay,
-      notes: `Captured via AI chat. No available slots — team to call. ${qualification.reason}`
+      preferredDay:        data.preferredDay,
+      notes:               `Captured via AI chat. No available slots — team to call. ${qualification.reason}`
     });
 
-    await conversationsApi.linkLead(conv.id, lead.id);
     setState(s => ({ ...s, conversationId: conv.id, leadId: lead.id }));
   } catch (err) {
     console.error('[useConversation] persistLeadOnly failed:', err);
