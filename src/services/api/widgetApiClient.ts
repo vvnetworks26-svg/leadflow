@@ -134,6 +134,69 @@ export const widgetApiClient = {
   },
 
   /**
+   * POST /api/v1/widget/:token/book
+   *
+   * Atomic booking workflow — creates conversation, lead, and appointment
+   * server-side in a single request. No JWT required.
+   *
+   * Returns a full BookingConfirmation-compatible payload.
+   */
+  async book(data: {
+    customerName:        string;
+    phone:               string;
+    email?:              string;
+    address?:            string;
+    zipCode?:            string;
+    service:             string;
+    emergency?:          boolean;
+    date:                string;    // YYYY-MM-DD
+    time:                string;    // HH:MM
+    displayDate?:        string;
+    displayTime?:        string;
+    duration?:           number;
+    preferredDay?:       string;
+    qualificationReason?:string;
+    status?:             string;
+    priority?:           string;
+    value?:              number;
+    notes?:              string;
+    conversationId?:     string;
+    messages?:           Array<{ id: string; sender: 'ai' | 'user' | 'agent'; text: string; timestamp: string }>;
+  }): Promise<{
+    appointmentId:     string;
+    confirmationNumber:string;
+    conversationId:    string;
+    leadId:            string;
+    customerName:      string;
+    service:           string;
+    date:              string;
+    time:              string;
+    displayDate:       string;
+    displayTime:       string;
+    estimatedDuration: number;
+    address:           string;
+  }> {
+    const res = await widgetHttp.post<{
+      status: string;
+      data: {
+        appointmentId:     string;
+        confirmationNumber:string;
+        conversationId:    string;
+        leadId:            string;
+        customerName:      string;
+        service:           string;
+        date:              string;
+        time:              string;
+        displayDate:       string;
+        displayTime:       string;
+        estimatedDuration: number;
+        address:           string;
+      };
+    }>(`/${WIDGET_TOKEN}/book`, data);
+    return res.data.data;
+  },
+
+  /**
    * POST /api/v1/widget/:token/chat
    * Send a message to the AI agent. No auth required.
    * Returns the AI reply, updated stage, and a bookingTriggered flag.
