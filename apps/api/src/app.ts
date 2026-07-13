@@ -34,6 +34,9 @@ const globalLimiter = rateLimit({
 export function createApp(): Application {
   const app = express();
 
+  // Render sits behind a reverse proxy
+  app.set('trust proxy', 1);
+
   // ── Request tracing — first, so every handler has req.requestId ──────────
   app.use(requestId);
 
@@ -44,14 +47,16 @@ export function createApp(): Application {
   const allowedOrigins = env.CORS_ORIGINS.split(',').map(o => o.trim());
   app.use(cors({
     origin: (origin, cb) => {
-      // Development: allow requests with no Origin (curl, Postman, server-to-server)
-      // Production:  require an explicit Origin that matches the allowlist
-      if (!origin) {
-        if (env.isDev) return cb(null, true);
-        return cb(new Error('CORS: requests without an Origin header are not allowed in production'));
-      }
-      if (allowedOrigins.includes(origin)) return cb(null, true);
-      cb(new Error(`CORS: origin ${origin} not allowed`));
+
+    if (!origin) {
+      return cb(null, true);
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      return cb(null, true);
+    }
+
+    cb(new Error(`CORS: origin ${origin} not allowed`));
     },
     credentials: true,
   }));

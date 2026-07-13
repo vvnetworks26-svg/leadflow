@@ -22,7 +22,7 @@ import {
   ArrowRight
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { apiService } from '../services/api';
+import { widgetApiClient } from '../services/api/widgetApiClient';
 import { useUser } from '../context/AuthContext';
 
 export default function Landing() {
@@ -83,45 +83,35 @@ export default function Landing() {
       setLeadContact(userText);
       setChatStep(3);
       
-      // Call service layer to create lead & appointment dynamically!
+      // Call the public widget booking endpoint — no JWT required.
       try {
-        const phone = userText.match(/\d+/g)?.join('') || '(555) 302-1829';
-        const formattedPhone = phone.length >= 10 ? `(${phone.slice(0,3)}) ${phone.slice(3,6)}-${phone.slice(6,10)}` : userText;
-        
-        const lead = await apiService.createLead({
-          name: leadName,
-          email: leadName.toLowerCase().replace(/\s+/g, '') + '@gmail.com',
-          phone: formattedPhone,
-          address: '742 Evergreen Terrace, Atlanta, GA',
-          status: 'New',
-          priority: 'High',
-          value: leadNeed.toLowerCase().includes('replace') || leadNeed.toLowerCase().includes('quote') ? 7800 : 350,
-          source: 'AI Chatbot',
-          hvacNeed: leadNeed,
-          notes: `Lead captured via live AI landing page chat assistant. Customer reported need: "${leadNeed}".`
-        });
+        const phone = userText.match(/\d+/g)?.join('') || '5553021829';
+        const formattedPhone = phone.length >= 10
+          ? `(${phone.slice(0,3)}) ${phone.slice(3,6)}-${phone.slice(6,10)}`
+          : userText;
 
-        // Auto schedule an appointment for today + 1 day
         const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        await apiService.createAppointment({
-          leadId: lead.id,
-          leadName: lead.name,
-          leadPhone: lead.phone,
-          date: tomorrow,
-          time: '13:00',
-          duration: 90,
-          type: leadNeed.toLowerCase().includes('replace') || leadNeed.toLowerCase().includes('quote') ? 'System Replacement Quote' : 'Repair Consultation',
-          status: 'Scheduled',
-          notes: `Booking created via Landing Page Assistant. Assigned to standby tech.`,
-          assignedTechnician: 'Mike Reynolds',
-          value: lead.value
+        const isReplacement = leadNeed.toLowerCase().includes('replace') || leadNeed.toLowerCase().includes('quote');
+
+        await widgetApiClient.book({
+          customerName:  leadName,
+          phone:         formattedPhone,
+          email:         leadName.toLowerCase().replace(/\s+/g, '') + '@gmail.com',
+          address:       '742 Evergreen Terrace, Atlanta, GA',
+          service:       leadNeed,
+          emergency:     false,
+          date:          tomorrow,
+          time:          '13:00',
+          displayDate:   'Tomorrow',
+          displayTime:   '1:00 PM',
+          duration:      90,
+          status:        'New',
+          priority:      'High',
+          value:         isReplacement ? 7800 : 350,
+          notes:         `Lead captured via live AI landing page chat assistant. Customer reported need: "${leadNeed}".`,
         });
-
-        // Also seed a conversation
-        await apiService.getOrCreateConversation(leadName, formattedPhone, leadName.toLowerCase().replace(/\s+/g, '') + '@gmail.com');
-
       } catch (err) {
-        console.error("Error creating live-demo lead:", err);
+        console.error('[Landing] widgetApiClient.book failed:', err);
       }
 
       setChatMessages(prev => [
@@ -135,21 +125,22 @@ export default function Landing() {
   const handleContactSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await apiService.createLead({
-        name: contactForm.name,
-        email: contactForm.email,
-        phone: contactForm.phone,
-        address: contactForm.address,
-        status: 'New',
-        priority: 'Medium',
-        value: 1200,
-        source: 'Contact Form',
+      // Use the public widget endpoint — no JWT required.
+      await widgetApiClient.createLead({
+        name:     contactForm.name,
+        phone:    contactForm.phone,
+        email:    contactForm.email,
+        address:  contactForm.address,
         hvacNeed: contactForm.hvacNeed,
-        notes: `Contact Form Submission: "${contactForm.message}"`
+        status:   'New',
+        priority: 'Medium',
+        value:    1200,
+        source:   'Contact Form',
+        notes:    `Contact Form Submission: "${contactForm.message}"`,
       });
       setContactSubmitted(true);
     } catch (err) {
-      console.error(err);
+      console.error('[Landing] contact form submit failed:', err);
     }
   };
 
