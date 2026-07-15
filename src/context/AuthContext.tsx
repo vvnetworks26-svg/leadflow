@@ -9,7 +9,8 @@
  *   leadflow_user           — serialised User object (cache)
  */
 
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { User } from '../types';
 import { apiClient, setAccessToken, clearAccessToken } from '../lib/apiClient';
 
@@ -81,6 +82,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isSignedIn, setIsSignedIn] = useState(false);
   const [isLoaded, setIsLoaded]     = useState(false);
   const [user, setUser]             = useState<AuthUser | null>(null);
+  const navigate                    = useNavigate();
+
+  // Ref so the event handler always sees the latest navigate without re-registering
+  const navigateRef = useRef(navigate);
+  useEffect(() => { navigateRef.current = navigate; }, [navigate]);
+
+  /**
+   * Listen for 401 events dispatched by the Axios interceptor.
+   * Clears all auth state and redirects to /sign-in.
+   * The dedup flag in apiClient.ts ensures this fires at most once per session.
+   */
+  useEffect(() => {
+    function handleUnauthorized() {
+      clearSession();
+      setUser(null);
+      setIsSignedIn(false);
+      navigateRef.current('/sign-in', { replace: true });
+    }
+
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+  }, []); // empty deps — register once, navigateRef keeps it current
 
   /**
    * On mount: attempt to restore session.
