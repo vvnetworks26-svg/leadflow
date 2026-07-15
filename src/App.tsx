@@ -1,5 +1,5 @@
 import React from 'react';
-import { HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useUser } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 
@@ -80,7 +80,7 @@ function ChatWidgetPortal() {
 export default function App() {
   return (
     <AuthProvider>
-      <HashRouter>
+      <BrowserRouter>
         <ToastProvider>
           <ChatWidgetPortal />
           <Routes>
@@ -108,7 +108,7 @@ export default function App() {
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </ToastProvider>
-      </HashRouter>
+      </BrowserRouter>
     </AuthProvider>
   );
 }
