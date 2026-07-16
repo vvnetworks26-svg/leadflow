@@ -15,7 +15,7 @@
  *  10. Guardrail rules
  */
 
-import type { ConversationStage, ConversationMemory, QualificationScore, Recommendation } from './types';
+import type { ConversationStage, ConversationMemory, QualificationScore, Recommendation, ConversationPlan } from './types';
 import { STAGE_INSTRUCTIONS } from './conversation-state';
 import { memoryToPromptBlock } from './memory';
 import { formatKnowledgeForPrompt } from './knowledge';
@@ -122,6 +122,16 @@ function guardrailPrompt(): string {
 [/GUARDRAILS]`;
 }
 
+function plannerPrompt(plan?: ConversationPlan): string {
+  if (!plan?.questionToAsk) return '';
+  return `[CONVERSATION PLAN]
+Your next goal: ${plan.nextGoal}
+Suggested question: "${plan.questionToAsk}"
+Priority: ${plan.priority}
+IMPORTANT: Work this question naturally into your response. Do NOT ask for information already present in memory above.
+[/CONVERSATION PLAN]`;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export interface PromptParts {
@@ -131,8 +141,6 @@ export interface PromptParts {
 
 /**
  * Assemble the full dynamic system prompt.
- * Returns a system string + a knowledge block (injected as a user message
- * for models that don't support system instructions).
  */
 export function buildSystemPrompt(params: {
   org:             OrgContext;
@@ -142,8 +150,9 @@ export function buildSystemPrompt(params: {
   recommendations: Recommendation[];
   knowledgeHits:   KnowledgeEntry[];
   currentPage?:    string;
+  plan?:           ConversationPlan;
 }): PromptParts {
-  const { org, stage, memory, score, recommendations, knowledgeHits, currentPage } = params;
+  const { org, stage, memory, score, recommendations, knowledgeHits, currentPage, plan } = params;
 
   const systemParts = [
     coreSystemPrompt(org.aiTone),
@@ -154,6 +163,7 @@ export function buildSystemPrompt(params: {
     memoryToPromptBlock(memory),
     formatRecommendationsForPrompt(recommendations),
     pageContextPrompt(currentPage),
+    plannerPrompt(plan),
     guardrailPrompt(),
   ].filter(Boolean);
 
