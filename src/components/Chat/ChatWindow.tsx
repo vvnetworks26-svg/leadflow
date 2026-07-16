@@ -158,13 +158,14 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
         <div className="space-y-0.5">
           <AnimatePresence initial={false}>
             {messages.map((msg, idx) => (
-              <ChatBubble
-                key={msg.id}
-                message={msg}
-                isFirstInGroup={idx === 0 || messages[idx - 1]?.sender !== msg.sender}
-                isLastInGroup={idx === messages.length - 1 || messages[idx + 1]?.sender !== msg.sender}
-                onSlotSelect={handleSlotSelect}
-              />
+              <React.Fragment key={msg.id}>
+                <ChatBubble
+                  message={msg}
+                  isFirstInGroup={idx === 0 || messages[idx - 1]?.sender !== msg.sender}
+                  isLastInGroup={idx === messages.length - 1 || messages[idx + 1]?.sender !== msg.sender}
+                  onSlotSelect={handleSlotSelect}
+                />
+              </React.Fragment>
             ))}
           </AnimatePresence>
         </div>
