@@ -4,7 +4,7 @@
  * Central Axios instance for all HTTP repository calls.
  * - Reads VITE_API_URL from env
  * - Attaches JWT access token from localStorage on every request
- * - On 401, clears token (future: add refresh token rotation here)
+ * - On 401, fires a window event so AuthContext can clear state and redirect
  * - Normalises error responses into plain Error objects
  */
 
@@ -28,6 +28,14 @@ apiClient.interceptors.request.use((config: InternalAxiosRequestConfig) => {
 });
 
 // ─── Response interceptor: normalise errors ───────────────────────────────────
+
+/**
+ * Dedup flag — prevents multiple simultaneous 401 responses from each
+ * triggering their own redirect. Once one 401 is handled, the flag stays
+ * true until the page navigation resets it.
+ */
+let isHandling401 = false;
+
 apiClient.interceptors.response.use(
   res => res,
   (err: AxiosError<{ message?: string; code?: string }>) => {
@@ -37,9 +45,10 @@ apiClient.interceptors.response.use(
       err.message ??
       'An unexpected error occurred';
 
-    if (status === 401) {
-      // Token expired — clear stored credentials so the app re-prompts login
-      localStorage.removeItem('leadflow_access_token');
+    if (status === 401 && !isHandling401) {
+      isHandling401 = true;
+      // Notify AuthContext to clear state and redirect — see AuthContext.tsx
+      window.dispatchEvent(new CustomEvent('auth:unauthorized'));
     }
 
     // Attach the HTTP status so callers can branch on it without string matching

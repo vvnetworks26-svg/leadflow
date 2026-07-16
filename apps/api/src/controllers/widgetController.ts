@@ -132,10 +132,20 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
       });
     }
 
+    /**
+     * __init__ is a synthetic sentinel sent by the widget on first open to
+     * request the AI's opening greeting without the user having typed anything.
+     * We treat it as a standard greeting turn so the orchestrator generates a
+     * welcome message; we just don't echo it back into the history as a user
+     * message.
+     */
+    const isInit       = message.trim() === '__init__';
+    const userMessage  = isInit ? 'Hello' : message.trim();
+
     const output = await runOrchestrator({
       organizationId: orgId,
       conversationId,
-      userMessage:    message.trim(),
+      userMessage,
       history:        session.history,
       memory:         session.memory as any ?? emptyMemory(),
       stage:          (session.stage as ConversationStage) ?? 'greeting',
@@ -144,8 +154,15 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
 
     const newHistory = [
       ...session.history,
-      { role: 'user' as const,      content: message },
-      { role: 'assistant' as const, content: output.reply },
+      // For __init__ (greeting), only store the assistant reply — no user turn.
+      // For real messages, store both sides.
+      ...(isInit
+        ? [{ role: 'assistant' as const, content: output.reply }]
+        : [
+            { role: 'user' as const,      content: message },
+            { role: 'assistant' as const, content: output.reply },
+          ]
+      ),
     ].slice(-MAX_WIDGET_HISTORY);
 
     await AIConversationSessionModel.findByIdAndUpdate(session._id, {

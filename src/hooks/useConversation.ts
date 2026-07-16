@@ -1,19 +1,42 @@
-import { useState, useCallback } from 'react';
+/**
+ * useConversation.ts  (AI-driven, backend-authoritative)
+ *
+ * The frontend is a thin presentation layer. All conversational logic —
+ * intent detection, qualification, stage transitions, prompt generation —
+ * lives in the backend orchestrator (runOrchestrator via widgetChat).
+ *
+ * Frontend responsibilities:
+ *   - Render messages and typing indicator
+ *   - Maintain local UI state (messages, conversationId, isTyping, bookingState, error)
+ *   - Send every user message to POST /api/v1/widget/:token/chat
+ *   - When bookingTriggered === true, drive the slot-picker → confirm → book sub-flow
+ *   - Call POST /api/v1/widget/:token/book to persist the appointment
+ *
+ * Frontend is explicitly NOT responsible for:
+ *   - Deciding what the AI should say next
+ *   - Generating any AI prompts or responses
+ *   - Tracking qualification steps or stages
+ *   - Any scripted conversation logic
+ */
+
+import { useState, useCallback, useRef } from 'react';
 import {
-  ConversationData,
-  ConversationStep,
-  ChatMessage,
   ChatState,
+  ChatMessage,
   TimeSlot,
-  BookingConfirmation
+  BookingConfirmation,
+  ConversationStage,
+  BookingPhase,
 } from '../types';
-import { chatApi, formatPhone } from '../services/api/chat';
-import { qualifyLead, estimateDealValue } from '../services/qualification';
 import { widgetApiClient } from '../services/api/widgetApiClient';
 import { calendarService } from '../services/calendar/calendarService';
 import { notificationService } from '../services/notifications/notificationService';
-import { businessSettings } from '../services/business/businessSettings';
-const TYPING_DELAY_MS = 800;
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const TYPING_DELAY_MS = 600;
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function makeId(): string {
   return `chat_${Math.random().toString(36).substr(2, 9)}`;
@@ -34,333 +57,389 @@ function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
-/**
- * Derive the ordered qualification steps at runtime from AI config.
- *
- * - 'emergency' step is included only when enableEmergencyWorkflow is true.
- * - 'email' step is included only when collectEmail is true.
- *
- * This means changing those toggles in Settings immediately changes the
- * flow for the next conversation without touching any other code.
- */
-function buildQualificationSteps(): ConversationStep[] {
-  const cfg = businessSettings.get().aiConfig;
-  const steps: ConversationStep[] = ['greeting', 'name', 'service'];
-  if (cfg.enableEmergencyWorkflow) steps.push('emergency');
-  steps.push('zipCode', 'phone');
-  if (cfg.collectEmail) steps.push('email');
-  steps.push('preferredDay');
-  return steps;
-}
+const INITIAL_STATE: ChatState = {
+  messages: [],
+  conversationId: null,
+  isTyping: true,   // show typing while we fetch the greeting
+  stage: 'greeting',
+  bookingState: { phase: 'idle', availableSlots: [] },
+  loading: false,
+  error: null,
+};
 
-function nextQualStep(current: ConversationStep): ConversationStep {
-  const steps = buildQualificationSteps();
-  const idx = steps.indexOf(current);
-  if (idx === -1 || idx === steps.length - 1) return 'selectSlot';
-  return steps[idx + 1];
-}
+// ─── Hook ─────────────────────────────────────────────────────────────────────
 
-/**
- * useConversation
- *
- * Manages the full multi-step guided HVAC chat + booking flow:
- *   greeting → name → service → emergency → zipCode → phone → email → preferredDay
- *   → selectSlot (AI offers slots, user types a number)
- *   → confirmSlot (AI confirms choice, user types "yes")
- *   → booked (persisted, confirmation shown)
- *   → completed
- */
 export function useConversation() {
-  const [state, setState] = useState<ChatState>({
-    step: 'greeting',
-    messages: [makeAiMessage(chatApi.getGreeting())],
-    data: {},
-    isTyping: false
-  });
+  const [state, setState] = useState<ChatState>(INITIAL_STATE);
 
   /**
-   * sendMessage — the single entry point for every user input.
-   * Handles both the text-based qualification steps and the
-   * slot-selection / confirmation steps.
+   * Ref that tracks whether we have already dispatched the greeting message.
+   * Using a ref (not state) avoids triggering re-renders and prevents the
+   * greeting from firing twice in React Strict Mode.
+   */
+  const greetingFiredRef = useRef(false);
+
+  // ── Greeting initialisation ──────────────────────────────────────────────
+  /**
+   * Called once when the chat window first opens.
+   * Sends a silent "hello" to the backend to get the AI's opening message,
+   * and receives back a conversationId for the rest of the session.
+   */
+  const initConversation = useCallback(async () => {
+    if (greetingFiredRef.current) return;
+    greetingFiredRef.current = true;
+
+    // Derive a stable conversationId for this widget session.
+    const conversationId = makeId();
+
+    setState(s => ({ ...s, conversationId, isTyping: true }));
+
+    await delay(TYPING_DELAY_MS);
+
+    try {
+      const response = await widgetApiClient.chat({
+        message: '__init__',
+        conversationId,
+        currentPage: typeof window !== 'undefined' ? window.location.pathname : undefined,
+      });
+
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        stage: response.stage as ConversationStage,
+        messages: [makeAiMessage(response.reply)],
+      }));
+    } catch {
+      // Fallback greeting if the backend is unreachable
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        messages: [makeAiMessage("Hi! How can I help you today? I'm here to answer your questions and schedule service.")],
+      }));
+    }
+  }, []);
+
+  // ── Send message ─────────────────────────────────────────────────────────
+  /**
+   * The single entry point for every user input.
+   *
+   * - During the normal AI conversation, each message is forwarded to the
+   *   backend orchestrator which owns all conversational logic.
+   * - When the backend signals bookingTriggered, the frontend transitions
+   *   into the booking sub-flow (slot picker → confirm → POST /widget/book).
+   * - Slot selection and booking confirmation are handled client-side because
+   *   they are pure UI interactions; the final booking is still persisted
+   *   server-side via POST /widget/book.
    */
   const sendMessage = useCallback(async (text: string) => {
-    const current = state.step;
-    if (state.isTyping || current === 'completed') return;
+    const { isTyping, loading, stage, bookingState, conversationId } = state;
+
+    if (isTyping || loading || stage === 'completed') return;
+    if (!text.trim()) return;
 
     const userMsg = makeUserMessage(text);
 
-    // ── Slot selection step ─────────────────────────────────────────
-    if (current === 'selectSlot') {
-      const idx = parseInt(text.trim(), 10) - 1;
-      const slots = state.data.availableSlots ?? [];
-
-      if (isNaN(idx) || idx < 0 || idx >= slots.length) {
-        setState(s => ({
-          ...s,
-          messages: [
-            ...s.messages,
-            userMsg,
-            makeAiMessage(`Please reply with a number between 1 and ${slots.length}.`)
-          ]
-        }));
-        return;
-      }
-
-      const chosen = slots[idx];
-      setState(s => ({
-        ...s,
-        messages: [...s.messages, userMsg],
-        data: { ...s.data, selectedSlot: chosen },
-        step: 'confirmSlot',
-        isTyping: true
-      }));
-
-      await delay(TYPING_DELAY_MS);
-
-      const confirmText =
-        `Great choice! I'll book you for **${chosen.displayDate} at ${chosen.displayTime}**.\n\n` +
-        `Service: ${state.data.service}\nName: ${state.data.name}\nPhone: ${state.data.phone}\n\n` +
-        `Type "yes" to confirm or "no" to see other times.`;
-
-      setState(s => ({
-        ...s,
-        messages: [...s.messages, makeAiMessage(confirmText)],
-        isTyping: false
-      }));
+    // ── Booking sub-flow ─────────────────────────────────────────────────
+    if (bookingState.phase === 'selectSlot') {
+      await handleSlotSelection(text, userMsg);
       return;
     }
 
-    // ── Confirm slot step ───────────────────────────────────────────
-    if (current === 'confirmSlot') {
-      const lower = text.trim().toLowerCase();
-
-      if (lower.startsWith('n') || lower.includes('no') || lower.includes('other')) {
-        // Go back to selectSlot and re-show slots
-        setState(s => ({
-          ...s,
-          messages: [...s.messages, userMsg],
-          step: 'selectSlot',
-          isTyping: true
-        }));
-        await delay(TYPING_DELAY_MS);
-        const slots = state.data.availableSlots ?? [];
-        setState(s => ({
-          ...s,
-          messages: [...s.messages, makeAiMessage(buildSlotPrompt(slots), { slots })],
-          isTyping: false
-        }));
-        return;
-      }
-
-      if (!lower.startsWith('y') && !lower.includes('yes') && !lower.includes('confirm')) {
-        setState(s => ({
-          ...s,
-          messages: [
-            ...s.messages,
-            userMsg,
-            makeAiMessage('Please type "yes" to confirm or "no" to pick a different time.')
-          ]
-        }));
-        return;
-      }
-
-      // Confirmed — book it
-      setState(s => ({
-        ...s,
-        messages: [...s.messages, userMsg],
-        step: 'booked',
-        isTyping: true
-      }));
-
-      await delay(TYPING_DELAY_MS * 1.5);
-
-      // Persist everything and get confirmation
-      const confirmation = await persistBooking(state, setState);
-
-      if (confirmation) {
-        const doneMsg = makeAiMessage(
-          `Your appointment is confirmed! 🎉\n\nConfirmation # ${confirmation.confirmationNumber}\n${confirmation.displayDate} at ${confirmation.displayTime}\n\nWe look forward to seeing you!`,
-          { confirmation }
-        );
-        setState(s => ({
-          ...s,
-          messages: [...s.messages, doneMsg],
-          isTyping: false,
-          step: 'completed'
-        }));
-      } else {
-        setState(s => ({
-          ...s,
-          messages: [
-            ...s.messages,
-            makeAiMessage('Something went wrong booking your appointment. Our team will call you shortly!')
-          ],
-          isTyping: false,
-          step: 'completed'
-        }));
-      }
+    if (bookingState.phase === 'confirmSlot') {
+      await handleSlotConfirmation(text, userMsg);
       return;
     }
 
-    // ── Standard qualification steps ────────────────────────────────
-    const validationError = chatApi.validateResponse(current, text);
-    if (validationError) {
-      setState(s => ({
-        ...s,
-        messages: [...s.messages, userMsg, makeAiMessage(validationError)]
-      }));
-      return;
-    }
-
-    const newData = parseResponse(current, text, state.data);
-    const nextStep = nextQualStep(current);
+    // ── Normal AI conversation ────────────────────────────────────────────
+    const cid = conversationId ?? makeId();
 
     setState(s => ({
       ...s,
+      conversationId: cid,
       messages: [...s.messages, userMsg],
-      data: newData,
-      step: nextStep,
-      isTyping: true
+      isTyping: true,
+      error: null,
     }));
 
     await delay(TYPING_DELAY_MS);
 
-    // After preferredDay → fetch slots
-    if (nextStep === 'selectSlot') {
-      const slots = await calendarService.getAvailableSlots(newData.preferredDay, 60);
-      const updatedData = { ...newData, availableSlots: slots };
+    try {
+      const response = await widgetApiClient.chat({
+        message: text.trim(),
+        conversationId: cid,
+        currentPage: typeof window !== 'undefined' ? window.location.pathname : undefined,
+      });
 
-      if (slots.length === 0) {
+      const nextStage = response.stage as ConversationStage;
+
+      // Check whether to trigger booking flow
+      if (response.bookingTriggered) {
+        // Add the AI reply first, then start loading slots
         setState(s => ({
           ...s,
-          data: updatedData,
-          messages: [
-            ...s.messages,
-            makeAiMessage(
-              "I'm sorry, we don't have openings matching your preference right now. " +
-              "Our team will call you at " + newData.phone + " to arrange a time. Thank you!"
-            )
-          ],
           isTyping: false,
-          step: 'completed'
+          stage: nextStage,
+          messages: [...s.messages, makeAiMessage(response.reply)],
+          bookingState: { ...s.bookingState, phase: 'loadingSlots' },
         }));
-        await persistLeadOnly(updatedData, [...state.messages, userMsg], setState);
+
+        await initiateBookingFlow();
         return;
       }
 
       setState(s => ({
         ...s,
-        data: updatedData,
+        isTyping: false,
+        stage: nextStage,
+        messages: [...s.messages, makeAiMessage(response.reply)],
+      }));
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Something went wrong. Please try again.';
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        error: message,
         messages: [
           ...s.messages,
-          makeAiMessage(buildSlotPrompt(slots), { slots })
+          makeAiMessage("I'm having trouble connecting right now. Please try again in a moment."),
         ],
-        isTyping: false
+      }));
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state]);
+
+  // ── Booking sub-flow helpers ──────────────────────────────────────────────
+
+  /**
+   * Fetch available time slots from the calendar service and present them
+   * in the chat via the SlotPicker component.
+   */
+  async function initiateBookingFlow() {
+    try {
+      const slots = await calendarService.getAvailableSlots(undefined, 60);
+
+      if (slots.length === 0) {
+        setState(s => ({
+          ...s,
+          bookingState: { phase: 'idle', availableSlots: [] },
+          messages: [
+            ...s.messages,
+            makeAiMessage(
+              "I'm sorry — we don't have any open slots right now. Our team will reach out to you directly to arrange a time."
+            ),
+          ],
+          stage: 'completed',
+        }));
+        return;
+      }
+
+      const slotIntroMsg = makeAiMessage(
+        "Here are our next available times. Please select one:",
+        { slots }
+      );
+
+      setState(s => ({
+        ...s,
+        bookingState: { phase: 'selectSlot', availableSlots: slots },
+        messages: [...s.messages, slotIntroMsg],
+      }));
+    } catch {
+      setState(s => ({
+        ...s,
+        bookingState: { phase: 'idle', availableSlots: [] },
+        messages: [
+          ...s.messages,
+          makeAiMessage(
+            "I wasn't able to load available times right now. Our team will contact you shortly to schedule."
+          ),
+        ],
+        stage: 'completed',
+      }));
+    }
+  }
+
+  /**
+   * Handle a slot selection.
+   * The user either clicked a SlotPicker button (which calls onSend(String(index)))
+   * or typed a number.
+   */
+  async function handleSlotSelection(text: string, userMsg: ChatMessage) {
+    const slots = state.bookingState.availableSlots;
+    const idx = parseInt(text.trim(), 10) - 1;
+
+    if (isNaN(idx) || idx < 0 || idx >= slots.length) {
+      setState(s => ({
+        ...s,
+        messages: [
+          ...s.messages,
+          userMsg,
+          makeAiMessage(`Please choose a number between 1 and ${slots.length}.`),
+        ],
       }));
       return;
     }
 
-    // Normal next prompt
-    const aiText = chatApi.getPromptForStep(nextStep, newData);
+    const chosen = slots[idx];
+
     setState(s => ({
       ...s,
-      messages: [...s.messages, makeAiMessage(aiText)],
-      isTyping: false
+      messages: [...s.messages, userMsg],
+      isTyping: true,
+      bookingState: { ...s.bookingState, phase: 'confirmSlot', selectedSlot: chosen },
     }));
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [state]);
 
+    await delay(TYPING_DELAY_MS);
+
+    const confirmPrompt =
+      `I'll book you for **${chosen.displayDate} at ${chosen.displayTime}**.\n\n` +
+      `Type **yes** to confirm or **no** to choose a different time.`;
+
+    setState(s => ({
+      ...s,
+      isTyping: false,
+      messages: [...s.messages, makeAiMessage(confirmPrompt)],
+    }));
+  }
+
+  /**
+   * Handle the yes/no confirmation after a slot has been chosen.
+   */
+  async function handleSlotConfirmation(text: string, userMsg: ChatMessage) {
+    const lower = text.trim().toLowerCase();
+    const { selectedSlot, availableSlots } = state.bookingState;
+
+    // ── User wants a different time ──────────────────────────────────────
+    if (lower.startsWith('n') || lower.includes('no') || lower.includes('other')) {
+      setState(s => ({
+        ...s,
+        messages: [...s.messages, userMsg],
+        isTyping: true,
+        bookingState: { ...s.bookingState, phase: 'selectSlot', selectedSlot: undefined },
+      }));
+
+      await delay(TYPING_DELAY_MS);
+
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        messages: [
+          ...s.messages,
+          makeAiMessage("No problem! Here are the available times again:", { slots: availableSlots }),
+        ],
+      }));
+      return;
+    }
+
+    // ── Not a clear yes or no ────────────────────────────────────────────
+    if (!lower.startsWith('y') && !lower.includes('yes') && !lower.includes('confirm')) {
+      setState(s => ({
+        ...s,
+        messages: [
+          ...s.messages,
+          userMsg,
+          makeAiMessage('Please type **yes** to confirm or **no** to pick a different time.'),
+        ],
+      }));
+      return;
+    }
+
+    // ── Confirmed — persist the booking ──────────────────────────────────
+    if (!selectedSlot) return;
+
+    setState(s => ({
+      ...s,
+      messages: [...s.messages, userMsg],
+      isTyping: true,
+      loading: true,
+      bookingState: { ...s.bookingState, phase: 'booking' },
+    }));
+
+    await delay(TYPING_DELAY_MS);
+
+    const confirmation = await persistBooking(state.conversationId, state.messages, selectedSlot);
+
+    if (confirmation) {
+      const doneMsg = makeAiMessage(
+        `Your appointment is confirmed! 🎉\n\nConfirmation: **${confirmation.confirmationNumber}**\n${confirmation.displayDate} at ${confirmation.displayTime}\n\nWe look forward to seeing you!`,
+        { confirmation }
+      );
+
+      notificationService.sendConfirmation(confirmation);
+
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        loading: false,
+        stage: 'completed',
+        messages: [...s.messages, doneMsg],
+        bookingState: { phase: 'booked', availableSlots: [], confirmation },
+      }));
+    } else {
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        loading: false,
+        stage: 'completed',
+        messages: [
+          ...s.messages,
+          makeAiMessage(
+            "Something went wrong while booking your appointment. Our team will reach out to you directly to confirm."
+          ),
+        ],
+        bookingState: { phase: 'idle', availableSlots: [] },
+      }));
+    }
+  }
+
+  // ── Reset ────────────────────────────────────────────────────────────────
   const resetConversation = useCallback(() => {
-    setState({
-      step: 'greeting',
-      messages: [makeAiMessage(chatApi.getGreeting())],
-      data: {},
-      isTyping: false
-    });
+    greetingFiredRef.current = false;
+    setState({ ...INITIAL_STATE, isTyping: false, messages: [] });
+    // Re-init greeting on next render via effect in ChatWidget
   }, []);
 
-  return { state, sendMessage, resetConversation };
+  return { state, sendMessage, initConversation, resetConversation };
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Booking persistence ──────────────────────────────────────────────────────
 
-function buildSlotPrompt(slots: TimeSlot[]): string {
-  const lines = slots
-    .map((s, i) => `${i + 1}. ${s.displayDate} at ${s.displayTime}`)
-    .join('\n');
-  return `Here are the next available times:\n\n${lines}\n\nReply with the number of your preferred slot.`;
-}
-
-function parseResponse(
-  step: ConversationStep,
-  text: string,
-  existing: ConversationData
-): ConversationData {
-  const trimmed = text.trim();
-  switch (step) {
-    case 'name':      return { ...existing, name: trimmed };
-    case 'service':   return { ...existing, service: trimmed };
-    case 'emergency': {
-      const lower = trimmed.toLowerCase();
-      return { ...existing, emergency: lower.startsWith('y') || lower.includes('yes') || lower.includes('emergency') };
-    }
-    case 'zipCode':   return { ...existing, zipCode: trimmed };
-    case 'phone':     return { ...existing, phone: formatPhone(trimmed) };
-    case 'email': {
-      const lower = trimmed.toLowerCase();
-      return { ...existing, email: lower === 'skip' ? undefined : trimmed };
-    }
-    case 'preferredDay': return { ...existing, preferredDay: trimmed };
-    default: return existing;
-  }
-}
-
-/** Full persist: conversation + lead + appointment + link everything */
+/**
+ * Calls POST /api/v1/widget/:token/book.
+ * Serialises the current chat messages so the server can store them on the
+ * conversation record. All business logic (lead creation, appointment creation,
+ * automation) is handled server-side.
+ */
 async function persistBooking(
-  state: ChatState,
-  setState: (fn: (s: ChatState) => ChatState) => void
+  conversationId: string | null,
+  messages: ChatMessage[],
+  slot: TimeSlot,
 ): Promise<BookingConfirmation | null> {
-  const { data } = state;
-  const slot = data.selectedSlot;
-  if (!slot) return null;
-
   try {
-    const qualification = qualifyLead(data);
-    const value = estimateDealValue(data.service ?? '', data.emergency ?? false);
-
-    // Serialize chat messages for the server
-    const messages = state.messages.map(m => ({
+    const serialisedMessages = messages.map(m => ({
       id:        m.id,
       sender:    m.sender as 'ai' | 'user' | 'agent',
       text:      m.text,
       timestamp: m.timestamp.toISOString(),
     }));
 
-    // Single public widget endpoint — creates conversation + lead + appointment
-    // atomically server-side. No JWT required.
     const booking = await widgetApiClient.book({
-      customerName:        data.name ?? 'Unknown',
-      phone:               data.phone ?? '',
-      email:               data.email,
-      address:             data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
-      zipCode:             data.zipCode,
-      service:             data.service ?? 'General HVAC Service',
-      emergency:           data.emergency ?? false,
-      date:                slot.date,
-      time:                slot.time,
-      displayDate:         slot.displayDate,
-      displayTime:         slot.displayTime,
-      duration:            60,
-      preferredDay:        data.preferredDay,
-      qualificationReason: qualification.reason,
-      status:              qualification.status,
-      priority:            qualification.priority,
-      value,
-      notes:               `Captured via AI chat. ${qualification.reason}`,
-      messages,
+      // The backend will extract name/service/phone from the conversation
+      // session it already has. We pass safe fallbacks here; the authoritative
+      // data lives in the AIConversationSession on the server.
+      customerName:  'Widget Customer',
+      phone:         '0000000000',
+      service:       'HVAC Service',
+      emergency:     false,
+      date:          slot.date,
+      time:          slot.time,
+      displayDate:   slot.displayDate,
+      displayTime:   slot.displayTime,
+      duration:      60,
+      conversationId: conversationId ?? undefined,
+      messages:      serialisedMessages,
     });
 
-    const confirmation: BookingConfirmation = {
+    return {
       appointmentId:     booking.appointmentId,
       confirmationNumber:booking.confirmationNumber,
       customerName:      booking.customerName,
@@ -372,72 +451,8 @@ async function persistBooking(
       estimatedDuration: booking.estimatedDuration,
       address:           booking.address,
     };
-
-    notificationService.sendConfirmation(confirmation);
-
-    setState(s => ({
-      ...s,
-      conversationId: booking.conversationId,
-      leadId:         booking.leadId,
-      appointmentId:  booking.appointmentId,
-      data:           { ...s.data, bookingConfirmation: confirmation },
-    }));
-
-    return confirmation;
   } catch (err) {
-    console.error('[useConversation] Failed to persist booking:', err);
+    console.error('[useConversation] persistBooking failed:', err);
     return null;
-  }
-}
-
-/** Fallback: only persist lead (no available slots) */
-async function persistLeadOnly(
-  data: ConversationData,
-  messages: ChatMessage[],
-  setState: (fn: (s: ChatState) => ChatState) => void
-): Promise<void> {
-  try {
-    const qualification = qualifyLead(data);
-    const value = estimateDealValue(data.service ?? '', data.emergency ?? false);
-
-    const convMessages = messages.map(m => ({
-      id: m.id,
-      sender: m.sender as 'ai' | 'user',
-      text: m.text,
-      timestamp: m.timestamp.toISOString()
-    }));
-
-    // Use public widget endpoint — no JWT required
-    const conv = await widgetApiClient.createConversation({
-      leadName:      data.name ?? 'Unknown',
-      leadPhone:     data.phone ?? '',
-      leadEmail:     data.email,
-      hvacNeed:      data.service,
-      status:        'completed',
-      lastMessageAt: new Date().toISOString(),
-      messages:      convMessages
-    });
-
-    const lead = await widgetApiClient.createLead({
-      name:                data.name ?? 'Unknown',
-      phone:               data.phone ?? '',
-      email:               data.email ?? '',
-      zipCode:             data.zipCode,
-      address:             data.zipCode ? `ZIP: ${data.zipCode}` : 'Not provided',
-      status:              qualification.status,
-      priority:            qualification.priority,
-      value,
-      source:              'AI Chat',
-      hvacNeed:            data.service ?? 'General inquiry',
-      emergency:           data.emergency ?? false,
-      conversationId:      conv.id,
-      qualificationReason: qualification.reason,
-      preferredDay:        data.preferredDay,
-      notes:               `Captured via AI chat. No available slots — team to call. ${qualification.reason}`
-    });
-
-    setState(s => ({ ...s, conversationId: conv.id, leadId: lead.id }));
-  } catch (err) {
-    console.error('[useConversation] persistLeadOnly failed:', err);
   }
 }

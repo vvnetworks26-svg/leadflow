@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { 
   Bot, 
@@ -24,102 +24,17 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { widgetApiClient } from '../services/api/widgetApiClient';
 import { useUser } from '../context/AuthContext';
+import { ChatWidget } from '../components/Chat/ChatWidget';
 
 export default function Landing() {
   const navigate = useNavigate();
   const { isSignedIn } = useUser();
-  
-  // States
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [chatStep, setChatStep] = useState(0); // 0: Name, 1: Need, 2: Phone/Email, 3: Success
-  const [leadName, setLeadName] = useState('');
-  const [leadNeed, setLeadNeed] = useState('AC Repair');
-  const [leadContact, setLeadContact] = useState('');
-  const [chatMessages, setChatMessages] = useState<Array<{ sender: 'ai' | 'user', text: string }>>([
-    { sender: 'ai', text: "Hey! I'm LeadFlow's automated booking assistant. I schedule emergency service and estimates 24/7. What's your name?" }
-  ]);
-  const [userInput, setUserInput] = useState('');
+
   const [faqOpen, setFaqOpen] = useState<number | null>(null);
-  
+
   // Contact Form State
   const [contactForm, setContactForm] = useState({ name: '', email: '', phone: '', address: '', hvacNeed: 'AC Repair', message: '' });
   const [contactSubmitted, setContactSubmitted] = useState(false);
-
-  // Chat message scroll ref
-  const chatEndRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (chatEndRef.current) {
-      chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [chatMessages]);
-
-  // Handle chat widget submissions
-  const handleChatSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!userInput.trim()) return;
-
-    const userText = userInput;
-    setUserInput('');
-    setChatMessages(prev => [...prev, { sender: 'user', text: userText }]);
-
-    await new Promise(resolve => setTimeout(resolve, 600));
-
-    if (chatStep === 0) {
-      setLeadName(userText);
-      setChatStep(1);
-      setChatMessages(prev => [
-        ...prev,
-        { sender: 'ai', text: `Nice to meet you, ${userText}! What service does your HVAC system need? (e.g., AC Repair, Heating Tune-up, Duct Cleaning, System Replacement Quote)` }
-      ]);
-    } else if (chatStep === 1) {
-      setLeadNeed(userText);
-      setChatStep(2);
-      setChatMessages(prev => [
-        ...prev,
-        { sender: 'ai', text: `Got it, ${userText}. Lastly, please enter your Phone Number and Email so we can confirm your technician's arrival.` }
-      ]);
-    } else if (chatStep === 2) {
-      setLeadContact(userText);
-      setChatStep(3);
-      
-      // Call the public widget booking endpoint — no JWT required.
-      try {
-        const phone = userText.match(/\d+/g)?.join('') || '5553021829';
-        const formattedPhone = phone.length >= 10
-          ? `(${phone.slice(0,3)}) ${phone.slice(3,6)}-${phone.slice(6,10)}`
-          : userText;
-
-        const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().split('T')[0];
-        const isReplacement = leadNeed.toLowerCase().includes('replace') || leadNeed.toLowerCase().includes('quote');
-
-        await widgetApiClient.book({
-          customerName:  leadName,
-          phone:         formattedPhone,
-          email:         leadName.toLowerCase().replace(/\s+/g, '') + '@gmail.com',
-          address:       '742 Evergreen Terrace, Atlanta, GA',
-          service:       leadNeed,
-          emergency:     false,
-          date:          tomorrow,
-          time:          '13:00',
-          displayDate:   'Tomorrow',
-          displayTime:   '1:00 PM',
-          duration:      90,
-          status:        'New',
-          priority:      'High',
-          value:         isReplacement ? 7800 : 350,
-          notes:         `Lead captured via live AI landing page chat assistant. Customer reported need: "${leadNeed}".`,
-        });
-      } catch (err) {
-        console.error('[Landing] widgetApiClient.book failed:', err);
-      }
-
-      setChatMessages(prev => [
-        ...prev,
-        { sender: 'ai', text: `Excellent! I have captured your ticket and successfully scheduled your appointment for tomorrow at 1:00 PM. A certified technician will call you shortly. Log in as an HVAC owner to see this lead populate instantly on the dashboard!` }
-      ]);
-    }
-  };
 
   // Handle traditional Contact Form Submission
   const handleContactSubmit = async (e: React.FormEvent) => {
@@ -207,7 +122,10 @@ export default function Landing() {
                 Start 14-Day Free Trial
               </Link>
               <button 
-                onClick={() => setIsChatOpen(true)}
+                onClick={() => {
+                  // The ChatWidget FAB at the bottom-right opens the AI chat
+                  document.querySelector<HTMLButtonElement>('[aria-label="Open chat assistant"]')?.click();
+                }}
                 className="inline-flex items-center justify-center space-x-2 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold px-6 py-4 rounded-lg transition shadow-sm"
               >
                 <Play className="h-4 w-4 fill-current text-indigo-500" />
@@ -763,92 +681,8 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Floating Interactive Chatbot Widget */}
-      <div className="fixed bottom-6 right-6 z-50">
-        <AnimatePresence>
-          {isChatOpen ? (
-            <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 30 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 30 }}
-              className="bg-white border border-slate-200 rounded-xl shadow-2xl w-[360px] h-[500px] flex flex-col justify-between overflow-hidden"
-            >
-              {/* Header */}
-              <div className="bg-slate-950 text-white p-4 flex items-center justify-between">
-                <div className="flex items-center space-x-2.5">
-                  <div className="bg-white/10 p-1.5 rounded-lg">
-                    <Bot className="h-5 w-5 text-indigo-400" />
-                  </div>
-                  <div>
-                    <h5 className="font-bold text-sm">LeadFlow Booking Bot</h5>
-                    <span className="text-[10px] text-slate-300 flex items-center space-x-1 font-semibold">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 block animate-pulse"></span>
-                      <span>Answers 24/7 HVAC</span>
-                    </span>
-                  </div>
-                </div>
-                <button onClick={() => setIsChatOpen(false)} className="hover:bg-white/10 p-1.5 rounded-lg transition text-slate-300">
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {/* Messages Body */}
-              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/50">
-                {chatMessages.map((msg, index) => (
-                  <div 
-                    key={index} 
-                    className={`p-3.5 rounded-xl text-sm leading-relaxed max-w-[85%] font-semibold ${
-                      msg.sender === 'ai' 
-                        ? 'bg-white border border-slate-100 text-slate-800 rounded-tl-none shadow-sm' 
-                        : 'bg-indigo-600 text-white ml-auto rounded-tr-none shadow-md shadow-indigo-100'
-                    }`}
-                  >
-                    {msg.text}
-                  </div>
-                ))}
-                <div ref={chatEndRef} />
-              </div>
-
-              {/* Chat Form */}
-              {chatStep <= 2 ? (
-                <form onSubmit={handleChatSend} className="p-3 border-t border-slate-150 flex items-center space-x-2 bg-white">
-                  <input
-                    type="text"
-                    value={userInput}
-                    onChange={(e) => setUserInput(e.target.value)}
-                    placeholder={
-                      chatStep === 0 ? "What is your name?" :
-                      chatStep === 1 ? "AC replacement, furnace fix..." :
-                      "Phone number and email..."
-                    }
-                    className="flex-1 px-3 py-2.5 rounded-lg border border-slate-200 focus:border-indigo-500 text-sm outline-none font-semibold transition"
-                  />
-                  <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-lg transition shadow-sm">
-                    <Send className="h-4 w-4" />
-                  </button>
-                </form>
-              ) : (
-                <div className="p-4 bg-emerald-50 text-emerald-800 text-xs font-bold text-center border-t border-emerald-100">
-                  🎉 Lead synced to owner dashboard. Go to dashboard to view!
-                </div>
-              )}
-            </motion.div>
-          ) : (
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setIsChatOpen(true)}
-              className="bg-indigo-600 hover:bg-indigo-700 text-white p-4 rounded-full shadow-2xl flex items-center justify-center relative cursor-pointer group"
-            >
-              <Bot className="h-6 w-6" />
-              <span className="absolute right-full mr-3 bg-slate-950 text-white text-xs font-bold px-3 py-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition whitespace-nowrap pointer-events-none shadow-md">
-                Test AI Booking Assistant
-              </span>
-              <span className="absolute -top-1 -right-1 h-3.5 w-3.5 rounded-full bg-emerald-500 border-2 border-white animate-pulse"></span>
-            </motion.button>
-          )}
-        </AnimatePresence>
-      </div>
+      {/* AI Chat Widget — backend-driven, no scripted logic */}
+      <ChatWidget />
 
       {/* Footer */}
       <footer className="bg-slate-950 text-slate-400 py-12 border-t border-slate-900 px-6 mt-auto">

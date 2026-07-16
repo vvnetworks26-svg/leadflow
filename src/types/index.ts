@@ -126,20 +126,77 @@ export interface ToastNotification {
 }
 
 // ─── Chat Widget ─────────────────────────────────────────────────────
-export type ConversationStep =
-  | 'greeting'
-  | 'name'
-  | 'service'
-  | 'emergency'
-  | 'zipCode'
-  | 'phone'
-  | 'email'
-  | 'preferredDay'
-  | 'selectSlot'
-  | 'confirmSlot'
-  | 'booked'
-  | 'completed';
 
+/**
+ * AI-driven conversation stage returned by the backend orchestrator.
+ * The frontend uses this only for rendering decisions — never for
+ * determining what to ask next.
+ */
+export type ConversationStage =
+  | 'greeting'
+  | 'discovery'
+  | 'qualification'
+  | 'recommendation'
+  | 'objection'
+  | 'booking'
+  | 'completed'
+  | 'escalated';
+
+/**
+ * Booking sub-state managed entirely on the frontend.
+ * Activated when the backend returns bookingTriggered: true.
+ */
+export type BookingPhase =
+  | 'idle'         // normal AI conversation
+  | 'loadingSlots' // fetching available time slots
+  | 'selectSlot'   // slot picker is visible
+  | 'confirmSlot'  // user chose a slot, awaiting confirmation
+  | 'booking'      // POST /widget/book in flight
+  | 'booked';      // booking confirmed
+
+export interface ChatMessage {
+  id: string;
+  sender: 'ai' | 'user';
+  text: string;
+  timestamp: Date;
+  /** Populated on AI messages that present slot options */
+  slots?: TimeSlot[];
+  /** Populated on the final AI message after a successful booking */
+  confirmation?: BookingConfirmation;
+}
+
+export interface BookingState {
+  phase: BookingPhase;
+  availableSlots: TimeSlot[];
+  selectedSlot?: TimeSlot;
+  confirmation?: BookingConfirmation;
+}
+
+/**
+ * The minimal frontend state for the AI-driven chat widget.
+ * No scripted steps, no conversation data — the backend owns all of that.
+ */
+export interface ChatState {
+  /** Messages to display in the chat window */
+  messages: ChatMessage[];
+  /** Backend-assigned conversation session ID */
+  conversationId: string | null;
+  /** Whether the AI is generating a reply */
+  isTyping: boolean;
+  /** Last known stage returned by the orchestrator */
+  stage: ConversationStage;
+  /** Booking sub-flow state (client-side only, after bookingTriggered) */
+  bookingState: BookingState;
+  /** Non-null while a network request is in flight */
+  loading: boolean;
+  /** Last error message, if any */
+  error: string | null;
+}
+
+// ─── Legacy aliases kept for backwards-compat with non-chat code ──────
+/** @deprecated Use ConversationStage */
+export type ConversationStep = ConversationStage;
+/** @deprecated Not used by AI-driven flow */
 export interface ConversationData {
   name?: string;
   service?: string;
@@ -151,25 +208,6 @@ export interface ConversationData {
   availableSlots?: TimeSlot[];
   selectedSlot?: TimeSlot;
   bookingConfirmation?: BookingConfirmation;
-}
-
-export interface ChatMessage {
-  id: string;
-  sender: 'ai' | 'user';
-  text: string;
-  timestamp: Date;
-  slots?: TimeSlot[];
-  confirmation?: BookingConfirmation;
-}
-
-export interface ChatState {
-  step: ConversationStep;
-  messages: ChatMessage[];
-  data: ConversationData;
-  isTyping: boolean;
-  conversationId?: string;
-  leadId?: string;
-  appointmentId?: string;
 }
 
 // ─── Business Settings Model (Sprint 4) ─────────────────────────────
