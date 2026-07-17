@@ -209,7 +209,15 @@ export type AIAnalyticsEventType =
   | 'tool_called'
   | 'conversation_summarized'
   | 'guardrail_blocked'
-  | 'conversation_dropped';
+  | 'conversation_dropped'
+  // v2.1 session lifecycle events
+  | 'session_created'
+  | 'session_resumed'
+  | 'session_expired'
+  | 'returning_visitor'
+  | 'sessions_archived_batch'
+  | 'sessions_deleted_batch'
+  | 'session_booked';
 
 export interface AIAnalyticsEvent {
   eventType:      AIAnalyticsEventType;

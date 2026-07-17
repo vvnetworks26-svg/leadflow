@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getWidgetConfig, widgetCreateLead, widgetCreateConversation, widgetChat, widgetBook } from '../controllers/widgetController';
+import { getWidgetConfig, widgetCreateLead, widgetCreateConversation, widgetChat, widgetBook, widgetCreateSession, widgetGetSession, widgetDeleteSession } from '../controllers/widgetController';
 
 const router = Router();
 
@@ -24,10 +24,13 @@ const widgetLimiter = rateLimit({
 router.use(widgetLimiter);
 
 // All routes are scoped to a widget token (:token = org slug or org ID)
-router.get('/:token/config',         getWidgetConfig);
-router.post('/:token/leads',         widgetCreateLead);
-router.post('/:token/conversations', widgetCreateConversation);
-router.post('/:token/chat',          widgetChat);
-router.post('/:token/book',          widgetBook);
+router.get('/:token/config',                        getWidgetConfig);
+router.post('/:token/session',                      widgetCreateSession);
+router.get('/:token/session/:widgetSessionId',      widgetGetSession);
+router.delete('/:token/session/:widgetSessionId',   widgetDeleteSession);
+router.post('/:token/leads',                        widgetCreateLead);
+router.post('/:token/conversations',                widgetCreateConversation);
+router.post('/:token/chat',                         widgetChat);
+router.post('/:token/book',                         widgetBook);
 
 export default router;

@@ -20,7 +20,7 @@ design document (design.md sections 1–14).
 
 ## Phase 1 — Schema & Model Upgrade
 
-- [ ] 1. **Upgrade `AIConversationSession` model** (`apps/api/src/models/AIConversationSession.model.ts`)
+- [x] 1. **Upgrade `AIConversationSession` model** (`apps/api/src/models/AIConversationSession.model.ts`)
   - Add `widgetSessionId: { type: String, sparse: true }` — optional, no required constraint so existing docs remain valid
   - Add `seq: { type: Number, default: 0, required: true }` — optimistic concurrency token
   - Add `status: { type: String, enum: ['active','archived','booked'], default: 'active', index: true }`
@@ -32,7 +32,7 @@ design document (design.md sections 1–14).
   - Update `IAIConversationSession` interface to include the new fields
   - _Verifies: REQ-5.1, REQ-5.4, REQ-5.5, REQ-14.4, REQ-14.5_
 
-- [ ] 2. **Extend `AIAnalyticsEventType`** (`apps/api/src/ai/types.ts`)
+- [x] 2. **Extend `AIAnalyticsEventType`** (`apps/api/src/ai/types.ts`)
   - Add to the union: `'session_created' | 'session_resumed' | 'session_expired' | 'returning_visitor' | 'sessions_archived_batch' | 'sessions_deleted_batch' | 'session_booked'`
   - No other changes to types.ts
   - Run `npx tsc --noEmit` — zero errors required before proceeding
@@ -42,7 +42,7 @@ design document (design.md sections 1–14).
 
 ## Phase 2 — Session API (Backend)
 
-- [ ] 3. **Create `widgetCreateSession` controller** (`apps/api/src/controllers/widgetController.ts`)
+- [x] 3. **Create `widgetCreateSession` controller** (`apps/api/src/controllers/widgetController.ts`)
   - Add handler for `POST /api/v1/widget/:token/session`
   - Reject requests whose body contains `widgetSessionId` or `conversationId` with HTTP 422 `VALIDATION_ERROR`
   - Resolve org via existing `resolveOrg(token)` — 404 on failure
@@ -52,7 +52,7 @@ design document (design.md sections 1–14).
   - Emit `session_created` analytics event via `persistEvents()`
   - _Verifies: REQ-2, REQ-11.1, REQ-11.3, REQ-13.1_
 
-- [ ] 4. **Create `widgetGetSession` controller**
+- [x] 4. **Create `widgetGetSession` controller**
   - Add handler for `GET /api/v1/widget/:token/session/:widgetSessionId`
   - Validate `:widgetSessionId` matches UUID v4 regex — return 422 `INVALID_SESSION_ID` before any DB query
   - Resolve org; query `{ widgetSessionId, organizationId }` using compound index
@@ -65,7 +65,7 @@ design document (design.md sections 1–14).
   - Emit `session_resumed` event if `turnCount > 0`
   - _Verifies: REQ-3, REQ-11.2, REQ-11.3, REQ-11.4, REQ-11.5, REQ-13.2_
 
-- [ ] 5. **Create `widgetDeleteSession` controller**
+- [x] 5. **Create `widgetDeleteSession` controller**
   - Add handler for `DELETE /api/v1/widget/:token/session/:widgetSessionId`
   - Validate UUID format (422), resolve org (404), check session exists and belongs to org (404)
   - If not found/wrong org: 404 `SESSION_NOT_FOUND`
@@ -120,7 +120,7 @@ design document (design.md sections 1–14).
   - Do not store `__resume__` as a user history entry (same as `__init__`)
   - _Verifies: REQ-7.4, REQ-7.5, REQ-13.4_
 
-- [ ] 10. **Run `npx tsc --noEmit` on backend** — zero errors required before Phase 4
+- [x] 10. **Run `npx tsc --noEmit` on backend** — zero errors required before Phase 4
 
 ---
 
