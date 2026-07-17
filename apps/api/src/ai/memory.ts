@@ -107,7 +107,20 @@ const CONTEXT_QUESTION_MAP: Array<{ patterns: RegExp[]; field: RichField }> = [
     field: 'emergency',
   },
   {
-    patterns: [/preferred\s+(day|time)/i, /when.*come\s+out/i, /day.*work/i, /schedule/i, /available/i, /appointment/i],
+    patterns: [
+      /preferred\s+(day|time)/i,
+      /when.*come\s+out/i,
+      /day.*work/i,
+      /what\s+(day|time).*works?\s+best/i,
+      /when\s+works?\s+best/i,
+      /which\s+day\s+works?/i,
+      /when\s+would\s+you\s+like\s+to\s+schedule/i,
+      /when\s+works?\s+best\s+for\s+you/i,
+      /today\s+or\s+tomorrow/i,
+      /schedule/i,
+      /available/i,
+      /appointment/i,
+    ],
     field: 'preferredTime',
   },
   {
@@ -164,7 +177,12 @@ function extractValueForField(field: RichField, text: string): string | boolean 
         const cleaned = trimmed
           .replace(/^(?:it'?s|we'?re|i work for|i'?m\s+(?:from|at|with)|our company is)\s+/i, '')
           .trim();
-        if (cleaned.length >= 2 && cleaned.length <= 60) return cleaned;
+        // Reject if the answer looks like a phone number, ZIP code, or employee count
+        // (these are numeric answers that belong to other fields)
+        const looksNumeric = /^\d[\d\s.\-()]{5,}$/.test(cleaned) ||  // phone-like
+                             /^\d{5}(?:-\d{4})?$/.test(cleaned) ||    // ZIP code
+                             /^\d{1,5}\s*(?:employees?|people|staff)?$/i.test(cleaned); // employee count
+        if (!looksNumeric && cleaned.length >= 2 && cleaned.length <= 60) return cleaned;
       }
       const m = trimmed.match(COMPANY_RE);
       return m ? m[1].trim() : null;
@@ -206,7 +224,12 @@ function extractValueForField(field: RichField, text: string): string | boolean 
       return null;
     }
     case 'preferredTime': {
+      // Accept short direct answers ("Tomorrow", "Monday") and
+      // common time phrases that may exceed 8 words
+      const lower = trimmed.toLowerCase();
+      const timePhrasesRE = /\b(today|tomorrow|monday|tuesday|wednesday|thursday|friday|saturday|sunday|morning|afternoon|evening|weekend|anytime|after\s+\d|at\s+\d|am\b|pm\b|\d+\s*(am|pm))\b/i;
       if (isShortDirectAnswer(trimmed)) return trimmed;
+      if (timePhrasesRE.test(lower) && trimmed.length <= 60) return trimmed;
       return null;
     }
     case 'budget': {

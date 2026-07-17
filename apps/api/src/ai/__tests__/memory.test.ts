@@ -261,3 +261,151 @@ describe('Duplicate question prevention', () => {
     );
   });
 });
+
+// ─── Appointment / preferredTime extraction ───────────────────────────────────
+
+describe('Contextual extraction — preferredTime', () => {
+  const appointmentQuestions = [
+    "What day and time works best for you?",
+    "What time works best?",
+    "Which day works best?",
+    "When would you like to schedule?",
+    "When works best for you?",
+    "Today or tomorrow?",
+    "Do you have a preferred day or time?",
+    "When would you like us to come out?",
+  ];
+
+  const appointmentAnswers = [
+    "Today at 3pm",
+    "Tomorrow morning",
+    "Monday at 10",
+    "Anytime after 5",
+    "Tomorrow",
+    "This weekend",
+    "Friday afternoon",
+  ];
+
+  for (const question of appointmentQuestions) {
+    it(`recognizes appointment question: "${question}"`, () => {
+      const mem = updateMemoryFromMessage(
+        emptyMemory(),
+        'Tomorrow afternoon',
+        question
+      );
+      assert.ok(
+        mem.rich.preferredTime.value !== null,
+        `preferredTime should be set for question: "${question}"`
+      );
+      assert.equal(mem.rich.preferredTime.source, 'context');
+    });
+  }
+
+  for (const answer of appointmentAnswers) {
+    it(`captures appointment answer: "${answer}"`, () => {
+      const mem = updateMemoryFromMessage(
+        emptyMemory(),
+        answer,
+        "What day and time works best for you?"
+      );
+      assert.ok(
+        mem.rich.preferredTime.value !== null,
+        `preferredTime should be set for answer: "${answer}"`
+      );
+      assert.equal(mem.rich.preferredTime.value, answer);
+    });
+  }
+});
+
+// ─── Cross-field contamination prevention ─────────────────────────────────────
+
+describe('No cross-field contamination', () => {
+  it('company question → company answer (not phone)', () => {
+    const mem = updateMemoryFromMessage(
+      emptyMemory(),
+      'Acme Corp',
+      "What company are you with?"
+    );
+    assert.equal(mem.company, 'Acme Corp');
+    assert.equal(mem.phone, null, 'phone should not be set');
+  });
+
+  it('phone question → phone answer (not company)', () => {
+    const mem = updateMemoryFromMessage(
+      emptyMemory(),
+      '555-123-4567',
+      "What phone number can our technician call?"
+    );
+    assert.ok(mem.phone !== null, 'phone should be set');
+    assert.equal(mem.company, null, 'company should not be set from a phone number');
+  });
+
+  it('company question → numeric answer is rejected as company', () => {
+    const mem = updateMemoryFromMessage(
+      emptyMemory(),
+      '555-123-4567',
+      "What company are you with?"
+    );
+    // A phone number should NOT be stored as company name
+    assert.equal(
+      mem.company, null,
+      `company should not be set to a phone number, got: "${mem.company}"`
+    );
+  });
+
+  it('company question → ZIP code is rejected as company', () => {
+    const mem = updateMemoryFromMessage(
+      emptyMemory(),
+      '90210',
+      "What company are you with?"
+    );
+    assert.equal(
+      mem.company, null,
+      `company should not be set to a ZIP code, got: "${mem.company}"`
+    );
+  });
+
+  it('employee count question → "20 employees" extracted correctly, not as company', () => {
+    const mem = updateMemoryFromMessage(
+      emptyMemory(),
+      '20 employees',
+      "How many people are on your team?"
+    );
+    assert.equal(mem.employeeCount, '20');
+    assert.equal(mem.company, null, 'company should not be set from employee count answer');
+  });
+
+  it('appointment question → time answer does not contaminate other fields', () => {
+    const mem = updateMemoryFromMessage(
+      emptyMemory(),
+      'Today at 3pm',
+      "What day and time works best for you?"
+    );
+    assert.equal(mem.rich.preferredTime.value, 'Today at 3pm');
+    assert.equal(mem.company, null);
+    assert.equal(mem.phone, null);
+    assert.equal(mem.visitorName, null);
+  });
+
+  it('stale context does not bleed into next turn', () => {
+    // Turn 1: AI asks for company, user answers
+    const turn1 = updateMemoryFromMessage(
+      emptyMemory(),
+      'VV Networks',
+      "What company are you with?"
+    );
+    assert.equal(turn1.company, 'VV Networks');
+
+    // Turn 2: AI asks about the service issue — entirely different question
+    // The user's reply should NOT be treated as a company answer
+    const turn2 = updateMemoryFromMessage(
+      turn1,
+      'My AC stopped working',
+      "What's the issue with your system?"
+    );
+    // Company should still be VV Networks (from turn 1), not overwritten
+    assert.equal(turn2.company, 'VV Networks');
+    // Service should be extracted from the new context
+    assert.ok(turn2.rich.service.value !== null, 'service should be captured');
+  });
+});

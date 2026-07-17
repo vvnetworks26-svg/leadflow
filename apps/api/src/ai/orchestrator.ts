@@ -29,10 +29,10 @@ import type {
   AIAnalyticsEvent,
 } from './types';
 import { classifyIntent, hasBookingIntent }            from './intent';
-import { updateMemoryFromMessage, getMissingFields, memoryToRich } from './memory';
+import { updateMemoryFromMessage }                     from './memory';
 import { qualifyLead, shouldTriggerBooking }           from './qualification';
 import { generateRecommendations }                     from './recommendation';
-import { computeNextStage }                            from './conversation-state';
+import { computeNextStage, STAGE_INSTRUCTIONS }        from './conversation-state';
 import { buildSystemPrompt, type OrgContext }          from './prompt-builder';
 import { searchKnowledge }                             from './knowledge';
 import { executeTool, selectAutoTools }                from './tools';
@@ -114,7 +114,6 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   if (intent.intent === 'Demo') {
     updatedMemory.demoRequested = true;
   }
-
   // ── 4. Tool selection + execution ────────────────────────────────────────
   const autoToolNames = selectAutoTools(userMessage, stage, intent.intent);
   for (const toolName of autoToolNames) {
@@ -225,12 +224,16 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     ];
   }
 
-  // ── 13. Booking detection ─────────────────────────────────────────────────
-  const bookingTriggered = shouldTriggerBooking(qualification) &&
-    hasBookingIntent(userMessage, intent);
+  // ── 13. Booking triggered signal ─────────────────────────────────────────
+  // The state machine (step 8) is the single authority for booking transitions.
+  // We derive bookingTriggered from what the state machine decided, not by
+  // re-evaluating intent here. This eliminates the duplicate booking logic.
+  const bookingTriggered = nextStage === 'booking' && stage !== 'booking';
 
-  if (bookingTriggered && updatedMemory.bookingStatus === 'none') {
-    updatedMemory.bookingStatus = 'requested';
+  if (bookingTriggered) {
+    if (updatedMemory.bookingStatus === 'none') {
+      updatedMemory.bookingStatus = 'requested';
+    }
     analyticsEvents.push(makeEvent('booking_triggered', organizationId, conversationId, {
       score: qualification.overall, temperature: qualification.temperature,
     }));
@@ -289,32 +292,26 @@ function buildBlockedOutput(
   };
 }
 function buildFallbackReply(
-  stage:   ConversationStage,
-  memory:  OrchestratorInput['memory'],
-  org:     OrgContext,
-  plan?:   ConversationPlan,
+  stage:  ConversationStage,
+  memory: OrchestratorInput['memory'],
+  org:    OrgContext,
+  plan?:  ConversationPlan,
 ): string {
-  // If the planner has a concrete next question, use it — sounds like a real dispatcher
+  // Priority 1: planner has a concrete question — use it directly.
+  // This is the primary path when Gemini is unavailable.
   if (plan?.questionToAsk) return plan.questionToAsk;
 
-  const name    = memory.visitorName ? `, ${memory.visitorName}` : '';
-  const missing = getMissingFields(memory);
+  // Priority 2: stage-level fallbacks for non-collection stages.
+  // These are the only cases where the planner returns an empty question.
+  const name = memory.visitorName ? `, ${memory.visitorName}` : '';
 
   switch (stage) {
     case 'greeting':
-      return org.welcomeMessage || `Hi! I'm the ${org.name} assistant. What can I help you with today?`;
-    case 'discovery':
-      return missing.length > 0
-        ? `Thanks${name}! To help you better, could you tell me a bit about your ${missing[0]}?`
-        : `Great${name}! What's the biggest challenge you're trying to solve right now?`;
-    case 'qualification':
-      return missing.length > 0
-        ? `Just a couple more things — could you share your ${missing[0]}?`
-        : `You sound like a great fit. Would a quick strategy call make sense to explore this further?`;
+      return org.welcomeMessage || `Hi! I'm the ${org.name} assistant. How can I help you today?`;
     case 'recommendation':
-      return `Based on what you've shared, I think our ${org.services[0] ?? 'solution'} would be a perfect fit. Want me to tell you more?`;
+      return `Based on what you've shared, I think our ${org.services[0] ?? 'solution'} would be a great fit. Want me to tell you more?`;
     case 'objection':
-      return `That's a completely understandable concern${name}. Many of our clients felt the same way initially. Would it help to see a quick example of the results they achieved?`;
+      return `That's a completely understandable concern${name}. Many of our clients felt the same way initially — would it help to hear how they got results?`;
     case 'booking':
       return `Absolutely${name}. What day and time works best for you?`;
     case 'completed':
@@ -322,6 +319,8 @@ function buildFallbackReply(
     case 'escalated':
       return `I want to make sure you get the right help${name}. Could you share your email or phone number so our team can follow up directly?`;
     default:
+      // Generic discovery/qualification fallback — planner should have caught this,
+      // but we need a safe final backstop.
       return `Thanks for reaching out! How can I help you today?`;
   }
 }
