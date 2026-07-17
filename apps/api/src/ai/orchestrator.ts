@@ -29,10 +29,10 @@ import type {
   AIAnalyticsEvent,
 } from './types';
 import { classifyIntent, hasBookingIntent }            from './intent';
-import { updateMemoryFromMessage, getMissingFields }   from './memory';
+import { updateMemoryFromMessage }                     from './memory';
 import { qualifyLead, shouldTriggerBooking }           from './qualification';
 import { generateRecommendations }                     from './recommendation';
-import { computeNextStage }                            from './conversation-state';
+import { computeNextStage, STAGE_INSTRUCTIONS }        from './conversation-state';
 import { buildSystemPrompt, type OrgContext }          from './prompt-builder';
 import { searchKnowledge }                             from './knowledge';
 import { executeTool, selectAutoTools }                from './tools';
@@ -40,9 +40,12 @@ import { checkInput, checkOutput, fallbackResponse }   from './guardrails';
 import { buildSummary }                                from './summarizer';
 import { sendToGemini, isGeminiConfigured }            from './gemini';
 import { makeEvent, persistEvents }                    from './analytics';
+import { detectIndustry }                              from './industry-profiles';
+import { planNextMove }                                from './conversation-planner';
 import { OrganizationModel }                           from '../models/Organization.model';
 import { BusinessModel }                               from '../models/Business.model';
 import { logger }                                      from '../utils/logger';
+import type { ConversationPlan, RichConversationMemory } from './types';
 
 // ─── Org context loader ───────────────────────────────────────────────────────
 
@@ -102,6 +105,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // ── 3. Memory update from user message ────────────────────────────────────
   const lastAiMessage = [...history].reverse().find(m => m.role === 'assistant')?.content;
   const updatedMemory = updateMemoryFromMessage(memory, userMessage, lastAiMessage);
+  const richMemory    = updatedMemory as RichConversationMemory;
 
   // Track booking intent in memory
   if (hasBookingIntent(userMessage, intent) && updatedMemory.bookingStatus === 'none') {
@@ -110,7 +114,6 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   if (intent.intent === 'Demo') {
     updatedMemory.demoRequested = true;
   }
-
   // ── 4. Tool selection + execution ────────────────────────────────────────
   const autoToolNames = selectAutoTools(userMessage, stage, intent.intent);
   for (const toolName of autoToolNames) {
@@ -159,6 +162,17 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     };
   }
 
+  // ── 9a. Conversation planner ──────────────────────────────────────────────
+  const industryKey = detectIndustry(orgContext.industry, richMemory);
+  const plan        = planNextMove({
+    memory:    richMemory,
+    progress:  richMemory.progress,
+    stage:     nextStage,
+    industry:  industryKey,
+    intent,
+    turnCount,
+  });
+
   const { system, knowledgeBlock } = buildSystemPrompt({
     org:             orgContext,
     stage:           nextStage,
@@ -167,6 +181,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     recommendations,
     knowledgeHits,
     currentPage,
+    plan,
   });
 
   // ── 10. Gemini call ──────────────────────────────────────────────────────
@@ -185,11 +200,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       reply = geminiResp.text;
     } else {
       logger.warn({ error: geminiResp.error }, '[Orchestrator] Gemini failed, using fallback');
-      reply = buildFallbackReply(nextStage, updatedMemory, orgContext);
+      reply = buildFallbackReply(nextStage, updatedMemory, orgContext, plan);
     }
   } else {
     // No API key — use rule-based fallback (dev/test mode)
-    reply = buildFallbackReply(nextStage, updatedMemory, orgContext);
+    reply = buildFallbackReply(nextStage, updatedMemory, orgContext, plan);
   }
 
   // ── 11. Guardrail: output check ──────────────────────────────────────────
@@ -209,12 +224,16 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     ];
   }
 
-  // ── 13. Booking detection ─────────────────────────────────────────────────
-  const bookingTriggered = shouldTriggerBooking(qualification) &&
-    hasBookingIntent(userMessage, intent);
+  // ── 13. Booking triggered signal ─────────────────────────────────────────
+  // The state machine (step 8) is the single authority for booking transitions.
+  // We derive bookingTriggered from what the state machine decided, not by
+  // re-evaluating intent here. This eliminates the duplicate booking logic.
+  const bookingTriggered = nextStage === 'booking' && stage !== 'booking';
 
-  if (bookingTriggered && updatedMemory.bookingStatus === 'none') {
-    updatedMemory.bookingStatus = 'requested';
+  if (bookingTriggered) {
+    if (updatedMemory.bookingStatus === 'none') {
+      updatedMemory.bookingStatus = 'requested';
+    }
     analyticsEvents.push(makeEvent('booking_triggered', organizationId, conversationId, {
       score: qualification.overall, temperature: qualification.temperature,
     }));
@@ -272,37 +291,36 @@ function buildBlockedOutput(
     analyticsEvents,
   };
 }
-
 function buildFallbackReply(
-  stage:   ConversationStage,
-  memory:  OrchestratorInput['memory'],
-  org:     OrgContext,
+  stage:  ConversationStage,
+  memory: OrchestratorInput['memory'],
+  org:    OrgContext,
+  plan?:  ConversationPlan,
 ): string {
+  // Priority 1: planner has a concrete question — use it directly.
+  // This is the primary path when Gemini is unavailable.
+  if (plan?.questionToAsk) return plan.questionToAsk;
+
+  // Priority 2: stage-level fallbacks for non-collection stages.
+  // These are the only cases where the planner returns an empty question.
   const name = memory.visitorName ? `, ${memory.visitorName}` : '';
-  const missing = getMissingFields(memory);
 
   switch (stage) {
     case 'greeting':
-      return org.welcomeMessage || `Hi! I'm the ${org.name} assistant. What can I help you with today?`;
-    case 'discovery':
-      return missing.length > 0
-        ? `Thanks${name}! To help you better, could you tell me a bit about your ${missing[0]}?`
-        : `Great${name}! What's the biggest challenge you're trying to solve right now?`;
-    case 'qualification':
-      return missing.length > 0
-        ? `Just a couple more questions — could you share your ${missing[0]}?`
-        : `You sound like a great fit. Would a quick strategy call make sense to explore this further?`;
+      return org.welcomeMessage || `Hi! I'm the ${org.name} assistant. How can I help you today?`;
     case 'recommendation':
-      return `Based on what you've shared, I think our ${org.services[0] ?? 'solution'} would be a perfect fit. Want me to tell you more?`;
+      return `Based on what you've shared, I think our ${org.services[0] ?? 'solution'} would be a great fit. Want me to tell you more?`;
     case 'objection':
-      return `That's a completely understandable concern${name}. Many of our clients felt the same way initially. Would it help to see a quick example of the results they achieved?`;
+      return `That's a completely understandable concern${name}. Many of our clients felt the same way initially — would it help to hear how they got results?`;
     case 'booking':
-      return `Sounds like a strategy session would be really valuable${name}. What day and time works best for you?`;
+      return `Absolutely${name}. What day and time works best for you?`;
     case 'completed':
       return `You're all set${name}! We'll be in touch shortly. Is there anything else I can help with?`;
     case 'escalated':
-      return `I want to make sure you get the right information${name}. Let me connect you with our team — could you share your email or phone number?`;
+      return `I want to make sure you get the right help${name}. Could you share your email or phone number so our team can follow up directly?`;
     default:
+      // Generic discovery/qualification fallback — planner should have caught this,
+      // but we need a safe final backstop.
       return `Thanks for reaching out! How can I help you today?`;
   }
 }

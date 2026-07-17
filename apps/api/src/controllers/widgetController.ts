@@ -11,7 +11,7 @@
  */
 
 import { Request, Response, NextFunction } from 'express';
-import { randomBytes }         from 'crypto';
+import { randomBytes, randomUUID } from 'crypto';
 import { OrganizationModel }   from '../models/Organization.model';
 import { LeadService }         from '../services/LeadService';
 import { ConversationService } from '../services/ConversationService';
@@ -22,6 +22,7 @@ import { CreateConversationSchema } from '../dto/conversation.dto';
 import { runOrchestrator }     from '../ai/orchestrator';
 import { AIConversationSessionModel } from '../models/AIConversationSession.model';
 import { emptyMemory }         from '../ai/types';
+import { makeEvent, persistEvents } from '../ai/analytics';
 import { AutomationService }   from '../crm/automation/AutomationService';
 import { z }                   from 'zod';
 import type { ConversationStage } from '../ai/types';
@@ -36,6 +37,212 @@ async function resolveOrg(token: string): Promise<string> {
 
   if (!org) throw new ApiError(404, 'Organization not found', 'ORG_NOT_FOUND');
   return org.id as string;
+}
+
+/**
+ * POST /api/v1/widget/:token/session
+ * Creates a new widget session with server-generated identifiers.
+ * Client must never supply widgetSessionId or conversationId — both are
+ * generated server-side. Verifies REQ-2, REQ-11.1, REQ-11.3, REQ-13.1.
+ */
+export async function widgetCreateSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    // Reject client-supplied session identifiers (REQ-11.1)
+    if ('widgetSessionId' in req.body || 'conversationId' in req.body) {
+      return res.status(422).json({
+        status:  'error',
+        code:    'VALIDATION_ERROR',
+        message: 'Session identifiers must not be supplied by the client',
+      });
+    }
+
+    // Resolve organization from token — 404 on failure (REQ-2.4)
+    const organizationId = await resolveOrg(req.params.token);
+
+    // Generate both IDs server-side (REQ-2.2, REQ-2.3)
+    const widgetSessionId = randomUUID();
+    const conversationId  = randomUUID();
+
+    // Persist the new session document (REQ-2.1)
+    await AIConversationSessionModel.create({
+      widgetSessionId,
+      conversationId,
+      organizationId,
+      status:        'active',
+      seq:           0,
+      schemaVersion: 1,
+      stage:         'greeting' as ConversationStage,
+      turnCount:     0,
+      lastActivity:  new Date(),
+    });
+
+    // Emit session_created analytics event (REQ-13.1)
+    persistEvents([
+      makeEvent('session_created', organizationId, conversationId, {
+        widgetSessionId,
+        organizationId,
+        source: 'widget',
+      }),
+    ]);
+
+    // Return only safe fields — never conversationId or organizationId (REQ-11.3)
+    return res.status(201).json({
+      status: 'ok',
+      data: {
+        widgetSessionId,
+        schemaVersion: 1,
+        stage:         'greeting',
+        turnCount:     0,
+      },
+    });
+  } catch (e) { next(e); }
+}
+
+// UUID v4 regex (REQ-11.4)
+const UUID_V4_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// 48-hour expiry threshold in milliseconds (REQ-3.3)
+const FORTY_EIGHT_HOURS_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * GET /api/v1/widget/:token/session/:widgetSessionId
+ * Returns conversation state for hydration.
+ * Verifies REQ-3, REQ-11.2, REQ-11.3, REQ-11.4, REQ-11.5, REQ-13.2.
+ */
+export async function widgetGetSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { widgetSessionId } = req.params;
+
+    // Validate UUID v4 format before any DB query (REQ-11.4, REQ-3.4)
+    if (!UUID_V4_RE.test(widgetSessionId)) {
+      return res.status(422).json({
+        status:  'error',
+        code:    'INVALID_SESSION_ID',
+        message: 'widgetSessionId must be a valid UUID v4',
+      });
+    }
+
+    // Resolve organization from token — 404 on failure (REQ-11.2)
+    const organizationId = await resolveOrg(req.params.token);
+
+    // Query using compound index { widgetSessionId, organizationId } (REQ-11.5)
+    // Implicitly enforces org ownership — returns null on cross-tenant mismatch (REQ-11.2)
+    const session = await AIConversationSessionModel
+      .findOne({ widgetSessionId, organizationId })
+      .lean();
+
+    // 404 if document not found or org mismatch (REQ-3.2, REQ-11.2)
+    if (!session) {
+      return res.status(404).json({
+        status:  'error',
+        code:    'SESSION_NOT_FOUND',
+        message: 'Session not found',
+      });
+    }
+
+    // 410 if session has been inactive for more than 48 hours (REQ-3.3)
+    const isExpired = session.lastActivity < new Date(Date.now() - FORTY_EIGHT_HOURS_MS);
+    if (isExpired) {
+      return res.status(410).json({
+        status:  'error',
+        code:    'SESSION_EXPIRED',
+        message: 'Session has expired',
+      });
+    }
+
+    // Emit session_resumed event only when turnCount > 0 (REQ-13.2)
+    if (session.turnCount > 0) {
+      persistEvents([
+        makeEvent('session_resumed', organizationId, session.conversationId, {
+          widgetSessionId: session.widgetSessionId,
+          turnCount:       session.turnCount,
+          lastActivity:    session.lastActivity.toISOString(),
+        }),
+      ]);
+    }
+
+    // Derive safe display fields — never expose full memory blob (REQ-11.3, REQ-3.5)
+    const memory = session.memory as any;
+    const displayName: string | null = memory?.visitorName ?? null;
+    const isReturning = session.turnCount > 0;
+
+    // Cap history at last 20 messages (design §3.2)
+    const history = (session.history ?? []).slice(-20);
+
+    // Return hydration payload — no _id, organizationId, conversationId, memory, qualification, rich (REQ-11.3)
+    return res.status(200).json({
+      status: 'ok',
+      data: {
+        widgetSessionId: session.widgetSessionId,
+        schemaVersion:   session.schemaVersion,
+        stage:           session.stage,
+        turnCount:       session.turnCount,
+        lastActivity:    session.lastActivity,
+        isReturning,
+        progress:        session.progress,
+        history,
+        displayName,
+      },
+    });
+  } catch (e) { next(e); }
+}
+
+/**
+ * DELETE /api/v1/widget/:token/session/:widgetSessionId
+ * Archives a widget session (never hard-deletes via this endpoint).
+ * Only archives sessions that exist, belong to the resolved org, and are not
+ * already archived — if any of those conditions fail it is a 404.
+ * Verifies REQ-4.
+ */
+export async function widgetDeleteSession(req: Request, res: Response, next: NextFunction) {
+  try {
+    const { widgetSessionId } = req.params;
+
+    // Validate UUID v4 format before any DB query (REQ-11.4, REQ-4)
+    if (!UUID_V4_RE.test(widgetSessionId)) {
+      return res.status(422).json({
+        status:  'error',
+        code:    'INVALID_SESSION_ID',
+        message: 'widgetSessionId must be a valid UUID v4',
+      });
+    }
+
+    // Resolve organization from token — 404 on failure
+    const organizationId = await resolveOrg(req.params.token);
+
+    // Archive the session atomically.
+    // Filter { widgetSessionId, organizationId, status: { $ne: 'archived' } } ensures:
+    //   - The session belongs to this org (cross-tenant protection, REQ-11.2)
+    //   - The session exists and is not already archived (REQ-4.3)
+    // If the document doesn't exist or is already archived this returns null → 404.
+    let updated;
+    try {
+      updated = await AIConversationSessionModel.findOneAndUpdate(
+        { widgetSessionId, organizationId, status: { $ne: 'archived' } },
+        { $set: { status: 'archived' } },
+        { new: true },
+      );
+    } catch (dbErr) {
+      // DB write failure → 500 INTERNAL_ERROR (REQ-4.4)
+      return res.status(500).json({
+        status:  'error',
+        code:    'INTERNAL_ERROR',
+        message: 'Failed to archive session',
+      });
+    }
+
+    // If no document was matched (not found or wrong org) → 404 SESSION_NOT_FOUND (REQ-4.2)
+    if (!updated) {
+      return res.status(404).json({
+        status:  'error',
+        code:    'SESSION_NOT_FOUND',
+        message: 'Session not found',
+      });
+    }
+
+    // Successfully archived — return 200 { status: 'ok' } (REQ-4.1)
+    return res.status(200).json({ status: 'ok' });
+  } catch (e) { next(e); }
 }
 
 /**

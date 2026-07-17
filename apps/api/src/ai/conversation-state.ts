@@ -1,16 +1,26 @@
 /**
- * ai/conversation-state.ts
+ * ai/conversation-state.ts  (v2.1 — Authoritative State Machine)
  *
- * Conversation state machine.
- * Stages: greeting → discovery → qualification → recommendation → objection
- *         → booking → completed / escalated
+ * This is the SINGLE source of truth for:
+ *   1. Valid stage transitions
+ *   2. Stage descriptions for Gemini
+ *   3. Stage-level completion conditions
  *
- * Transitions are automatic based on intent, qualification score, and memory.
+ * No other module may make stage transition decisions.
+ * The orchestrator calls computeNextStage() — nothing else does.
+ *
+ * Booking is detected here (once), not in the orchestrator.
+ * Completion is detected here (once), not in the planner.
  */
 
-import type { ConversationStage, DetectedIntent, QualificationScore, ConversationMemory } from './types';
+import type {
+  ConversationStage,
+  DetectedIntent,
+  QualificationScore,
+  ConversationMemory,
+} from './types';
 
-// ─── Valid transitions ────────────────────────────────────────────────────────
+// ─── Transition table ─────────────────────────────────────────────────────────
 
 const TRANSITIONS: Record<ConversationStage, ConversationStage[]> = {
   greeting:       ['discovery', 'booking', 'escalated'],
@@ -23,88 +33,149 @@ const TRANSITIONS: Record<ConversationStage, ConversationStage[]> = {
   escalated:      [],
 };
 
-// ─── Stage descriptions for prompt injection ──────────────────────────────────
+// ─── Stage instructions (injected into Gemini prompt) ────────────────────────
+//
+// These describe HOW Gemini should behave in each stage.
+// They do NOT contain any field-collection logic — that belongs to the planner.
 
 export const STAGE_INSTRUCTIONS: Record<ConversationStage, string> = {
-  greeting: `You are in the GREETING stage. Welcome the visitor warmly. Ask their name and what brings them here today. Keep it brief and inviting.`,
+  greeting:
+    `You are in the GREETING stage. Welcome the visitor warmly. Follow the conversation plan to collect the first required piece of information. Keep it brief and inviting.`,
 
-  discovery: `You are in the DISCOVERY stage. Your goal is to understand the visitor's situation. Ask open-ended questions about their business, current challenges, and what they're trying to achieve. One question at a time.`,
+  discovery:
+    `You are in the DISCOVERY stage. Follow the conversation plan exactly — collect the next required field in a natural, conversational way. One question per message only.`,
 
-  qualification: `You are in the QUALIFICATION stage. Gather the remaining qualification signals: company size, budget range, timeline, and decision-making authority. Be conversational — not interrogative. Use information already collected (see memory).`,
+  qualification:
+    `You are in the QUALIFICATION stage. You have the core information. Now gather qualification signals (budget, timeline, decision authority) conversationally. Use the conversation plan.`,
 
-  recommendation: `You are in the RECOMMENDATION stage. Based on what you've learned, present 1–2 relevant product recommendations with clear explanations of WHY each fits their situation. Be specific to their industry and pain points.`,
+  recommendation:
+    `You are in the RECOMMENDATION stage. Present 1–2 relevant solutions with clear explanations of WHY each fits this visitor's specific situation. Be concrete and industry-specific.`,
 
-  objection: `You are in the OBJECTION HANDLING stage. The visitor has raised a concern. Address it using consultative selling — empathize, validate, then reframe the value. Never be pushy. Offer a low-commitment next step.`,
+  objection:
+    `You are in the OBJECTION HANDLING stage. Empathize with the visitor's concern, validate it, then reframe the value. Never be pushy. Offer a low-commitment next step.`,
 
-  booking: `You are in the BOOKING stage. The lead is ready for a strategy session. Enthusiastically confirm the next step and guide them to book a call. Ask for their preferred time and collect contact details if not yet gathered.`,
+  booking:
+    `You are in the BOOKING stage. The visitor is ready to schedule. Guide them to confirm the appointment. Be warm and efficient.`,
 
-  completed: `You are in the COMPLETED stage. The booking or goal has been achieved. Thank the visitor, confirm next steps clearly, and close warmly.`,
+  completed:
+    `You are in the COMPLETED stage. The goal has been achieved. Thank the visitor warmly, confirm next steps clearly, and close the conversation.`,
 
-  escalated: `You are in the ESCALATED stage. The conversation needs human attention. Apologize for any confusion, confirm their contact details, and assure them a team member will follow up promptly.`,
+  escalated:
+    `You are in the ESCALATED stage. A human needs to take over. Apologize for any confusion, confirm the visitor's contact details, and assure them someone will follow up promptly.`,
 };
 
-// ─── Transition logic ─────────────────────────────────────────────────────────
+// ─── Escalation signals ───────────────────────────────────────────────────────
 
+const ESCALATION_RE = /\b(human|agent|person|representative|manager|speak\s+to\s+someone|talk\s+to\s+a\s+person)\b/i;
+
+function wantsEscalation(memory: ConversationMemory): boolean {
+  return ESCALATION_RE.test(memory.questionsAnswered.join(' '));
+}
+
+// ─── Authoritative transition function ───────────────────────────────────────
+
+/**
+ * The ONLY function that may change conversation stage.
+ *
+ * Rules (evaluated in priority order):
+ *   1. Terminal states never change
+ *   2. Explicit escalation request → escalated
+ *   3. Booking confirmed → completed
+ *   4. Booking intent detected → booking
+ *   5. Objection detected → objection handling
+ *   6. Enough data for recommendation → recommendation
+ *   7. Recommendation + high score → booking
+ *   8. Discovery → qualification after 3 turns with pain/goals
+ *   9. Greeting → discovery after first message
+ *  10. Default: stay in current stage
+ */
 export function computeNextStage(
-  current:      ConversationStage,
-  intent:       DetectedIntent,
-  score:        QualificationScore,
-  memory:       ConversationMemory,
-  turnCount:    number,
+  current:   ConversationStage,
+  intent:    DetectedIntent,
+  score:     QualificationScore,
+  memory:    ConversationMemory,
+  turnCount: number,
 ): ConversationStage {
   const allowed = TRANSITIONS[current];
-  if (allowed.length === 0) return current;   // terminal state
 
-  // Always escalate on explicit request
-  if (/human|agent|person|representative|manager|speak to someone/i.test(memory.questionsAnswered.join(' '))) {
-    if (allowed.includes('escalated')) return 'escalated';
+  // Rule 1: terminal states
+  if (allowed.length === 0) return current;
+
+  // Rule 2: explicit escalation
+  if (wantsEscalation(memory) && allowed.includes('escalated')) {
+    return 'escalated';
   }
 
-  // Booking intent → booking
+  // Rule 3: booking confirmed → completed
+  if (current === 'booking' && memory.bookingStatus === 'booked') {
+    return 'completed';
+  }
+
+  // Rule 4: booking intent → booking
+  // This is the ONLY place booking transition is decided.
+  const bookingIntentSignals =
+    intent.intent === 'Booking' ||
+    intent.intent === 'Demo'    ||
+    memory.demoRequested        ||
+    memory.bookingStatus === 'requested';
+
+  if (bookingIntentSignals && allowed.includes('booking')) {
+    return 'booking';
+  }
+
+  // Rule 5: objection → objection handling
   if (
-    (intent.intent === 'Booking' || intent.intent === 'Demo' || memory.demoRequested || memory.bookingStatus === 'requested') &&
-    allowed.includes('booking')
-  ) return 'booking';
-
-  // Booking confirmed → completed
-  if (current === 'booking' && memory.bookingStatus === 'booked') return 'completed';
-
-  // Objection detected → objection handling
-  if (intent.intent === 'Objection' && memory.objections.length > 0 && allowed.includes('objection')) {
+    intent.intent === 'Objection' &&
+    memory.objections.length > 0 &&
+    allowed.includes('objection')
+  ) {
     return 'objection';
   }
 
-  // Recommendation stage: score is sufficient or enough data collected
+  // Rule 6: qualification → recommendation when score is sufficient
   if (
     current === 'qualification' &&
     (score.overall >= 50 || score.missingInfo.length <= 2) &&
     allowed.includes('recommendation')
-  ) return 'recommendation';
+  ) {
+    return 'recommendation';
+  }
 
-  // Move from recommendation to booking if score crosses threshold
-  if (current === 'recommendation' && score.overall >= 65 && allowed.includes('booking')) {
+  // Rule 7: recommendation → booking when score crosses threshold
+  if (
+    current === 'recommendation' &&
+    score.overall >= 65 &&
+    allowed.includes('booking')
+  ) {
     return 'booking';
   }
 
-  // Progress discovery → qualification after a few turns with some data
+  // Rule 8: discovery → qualification after collecting some data
   if (
     current === 'discovery' &&
     turnCount >= 3 &&
     (memory.painPoints.length > 0 || memory.goals.length > 0) &&
     allowed.includes('qualification')
-  ) return 'qualification';
+  ) {
+    return 'qualification';
+  }
 
-  // Progress greeting → discovery after first message
+  // Rule 9: greeting → discovery after first message
   if (current === 'greeting' && turnCount >= 1 && allowed.includes('discovery')) {
     return 'discovery';
   }
 
-  return current;   // stay in current stage
+  // Rule 10: stay
+  return current;
 }
 
 /**
- * Check if a transition between two stages is valid.
+ * Returns true if transitioning from `from` to `to` is valid.
+ * Used only for validation/testing — not for driving transitions.
  */
-export function isValidTransition(from: ConversationStage, to: ConversationStage): boolean {
+export function isValidTransition(
+  from: ConversationStage,
+  to:   ConversationStage,
+): boolean {
   return TRANSITIONS[from].includes(to);
 }

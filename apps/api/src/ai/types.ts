@@ -209,7 +209,15 @@ export type AIAnalyticsEventType =
   | 'tool_called'
   | 'conversation_summarized'
   | 'guardrail_blocked'
-  | 'conversation_dropped';
+  | 'conversation_dropped'
+  // v2.1 session lifecycle events
+  | 'session_created'
+  | 'session_resumed'
+  | 'session_expired'
+  | 'returning_visitor'
+  | 'sessions_archived_batch'
+  | 'sessions_deleted_batch'
+  | 'session_booked';
 
 export interface AIAnalyticsEvent {
   eventType:      AIAnalyticsEventType;
@@ -217,6 +225,134 @@ export interface AIAnalyticsEvent {
   conversationId: string;
   payload:        Record<string, unknown>;
   timestamp:      string;
+}
+
+// ─── v2: Confidence-tracked memory field ─────────────────────────────────────
+
+/**
+ * Wraps a single memory value with provenance metadata.
+ * Enables the merge engine to keep higher-confidence values
+ * and prevents the AI from asking for already-known information.
+ */
+export interface MemoryField<T = string> {
+  value:      T | null;
+  confidence: number;                                // 0–100
+  source:     'context' | 'regex' | 'llm' | 'user' | null;
+}
+
+// ─── v2: Conversation progress tracker ───────────────────────────────────────
+
+/**
+ * Boolean flags that track which pieces of information have been collected.
+ * The planner uses these to determine what to ask next.
+ * Updated automatically whenever memory is updated.
+ */
+export interface ConversationProgress {
+  visitorNameCollected:  boolean;
+  companyCollected:      boolean;
+  phoneCollected:        boolean;
+  emailCollected:        boolean;
+  addressCollected:      boolean;
+  painCollected:         boolean;
+  budgetCollected:       boolean;
+  timelineCollected:     boolean;
+  appointmentCollected:  boolean;
+  serviceCollected:      boolean;
+  emergencyCollected:    boolean;
+}
+
+export function emptyProgress(): ConversationProgress {
+  return {
+    visitorNameCollected:  false,
+    companyCollected:      false,
+    phoneCollected:        false,
+    emailCollected:        false,
+    addressCollected:      false,
+    painCollected:         false,
+    budgetCollected:       false,
+    timelineCollected:     false,
+    appointmentCollected:  false,
+    serviceCollected:      false,
+    emergencyCollected:    false,
+  };
+}
+
+// ─── v2: Conversation planner output ─────────────────────────────────────────
+
+export interface ConversationPlan {
+  nextGoal:      string;    // human-readable goal, e.g. "collect phone number"
+  questionToAsk: string;    // ready-to-use question string
+  priority:      'critical' | 'high' | 'medium' | 'low';
+  fieldTargeted: keyof ConversationProgress | null;
+}
+
+// ─── v2: Rich memory (additive superset of ConversationMemory) ────────────────
+
+/**
+ * Extends the flat ConversationMemory with per-field confidence tracking.
+ * The flat fields remain for backward compatibility (MongoDB schema unchanged).
+ * The `rich` namespace is the authoritative source; flat fields are synced from it.
+ */
+export interface RichConversationMemory extends ConversationMemory {
+  rich: {
+    visitorName:   MemoryField<string>;
+    company:       MemoryField<string>;
+    phone:         MemoryField<string>;
+    email:         MemoryField<string>;
+    address:       MemoryField<string>;
+    zip:           MemoryField<string>;
+    industry:      MemoryField<string>;
+    employeeCount: MemoryField<string>;
+    budget:        MemoryField<string>;
+    timeline:      MemoryField<string>;
+    service:       MemoryField<string>;
+    emergency:     MemoryField<boolean>;
+    preferredTime: MemoryField<string>;
+  };
+  progress: ConversationProgress;
+}
+
+export function emptyRichMemory(): RichConversationMemory {
+  const f = <T = string>(): MemoryField<T> => ({ value: null, confidence: 0, source: null });
+  return {
+    // Flat ConversationMemory fields (unchanged for MongoDB compat)
+    visitorName:      null,
+    company:          null,
+    industry:         null,
+    location:         null,
+    employeeCount:    null,
+    painPoints:       [],
+    goals:            [],
+    budget:           null,
+    timeline:         null,
+    decisionMaker:    null,
+    servicesDiscussed:[],
+    questionsAnswered:[],
+    objections:       [],
+    bookingStatus:    'none',
+    demoRequested:    false,
+    phone:            null,
+    email:            null,
+    summary:          null,
+    lastUpdated:      new Date().toISOString(),
+    // Rich fields
+    rich: {
+      visitorName:   f<string>(),
+      company:       f<string>(),
+      phone:         f<string>(),
+      email:         f<string>(),
+      address:       f<string>(),
+      zip:           f<string>(),
+      industry:      f<string>(),
+      employeeCount: f<string>(),
+      budget:        f<string>(),
+      timeline:      f<string>(),
+      service:       f<string>(),
+      emergency:     f<boolean>(),
+      preferredTime: f<string>(),
+    },
+    progress: emptyProgress(),
+  };
 }
 
 // ─── Orchestrator I/O ─────────────────────────────────────────────────────────
@@ -234,6 +370,10 @@ export interface OrchestratorInput {
   memory:         ConversationMemory;
   stage:          ConversationStage;
   currentPage?:   string;
+  // v2 additions (optional — populated by orchestrator internally)
+  industry?:      string;
+  progress?:      ConversationProgress;
+  plan?:          ConversationPlan;
 }
 
 export interface OrchestratorOutput {

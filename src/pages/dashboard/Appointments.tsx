@@ -3,6 +3,7 @@ import { apiService } from '../../services/api';
 import { Appointment, AppointmentStatus, AppointmentType, Lead } from '../../types';
 import { useAppointments } from '../../hooks/useAppointments';
 import { AppointmentDetails } from '../../components/Appointments/AppointmentDetails';
+import { businessSettings } from '../../services/business/businessSettings';
 import {
   Plus, Calendar, Clock, Phone, Briefcase, UserCheck,
   Trash2, X, AlertCircle, Search
@@ -20,12 +21,12 @@ const STATUS_COLORS: Record<string, string> = {
   Rescheduled: 'bg-purple-50 text-purple-700 border-purple-100'
 };
 
-const TECHNICIANS = [
-  'Mike Reynolds (Senior Tech)',
-  'Chris Miller (Tune-ups)',
-  'Dave Carter (Project Manager)',
-  'Standby Dispatch'
-];
+/** Load technician names from business settings, with a safe fallback. */
+function getTechnicianNames(): string[] {
+  const team = businessSettings.get().team.filter(t => t.status === 'Active');
+  if (team.length > 0) return team.map(t => `${t.name} (${t.role})`);
+  return ['Unassigned'];
+}
 
 export default function Appointments() {
   const { appointments, loading, refresh, updateStatus } = useAppointments();
@@ -42,26 +43,31 @@ export default function Appointments() {
   const [aptDate, setAptDate] = useState('');
   const [aptTime, setAptTime] = useState('');
   const [aptType, setAptType] = useState<AppointmentType>('Repair Consultation');
-  const [assignedTech, setAssignedTech] = useState(TECHNICIANS[0]);
+  const [assignedTech, setAssignedTech] = useState('');
   const [aptNotes, setAptNotes] = useState('');
   const [aptDuration, setAptDuration] = useState('90');
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const openScheduler = async () => {
     const data = await apiService.getLeads();
     setLeads(data);
     if (data.length > 0) setSelectedLeadId(data[0].id);
+    const techs = getTechnicianNames();
+    setAssignedTech(techs[0] ?? 'Unassigned');
+    setSaveError(null);
     setIsSchedulerOpen(true);
   };
 
   const handleCreateAppointment = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
+    setSaveError(null);
     try {
       const parentLead = leads.find(l => l.id === selectedLeadId);
       if (!parentLead) throw new Error('Select a valid lead.');
 
-      await apiService.createAppointment({
+      const apt = await apiService.createAppointment({
         leadId: selectedLeadId,
         leadName: parentLead.name,
         leadPhone: parentLead.phone,
@@ -74,14 +80,16 @@ export default function Appointments() {
         assignedTechnician: assignedTech,
         value: parentLead.value,
         source: 'Manual',
-        createdAt: new Date().toISOString()
       });
+
+      // Link the appointment back to the lead
+      await apiService.updateLead(selectedLeadId, { appointmentId: apt.id });
 
       setIsSchedulerOpen(false);
       setAptDate(''); setAptTime(''); setAptNotes('');
       await refresh();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      setSaveError(err?.message ?? 'Failed to save appointment. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -327,7 +335,7 @@ export default function Appointments() {
                       <label className="text-xs font-semibold text-slate-600 uppercase tracking-wider">Technician</label>
                       <select value={assignedTech} onChange={e => setAssignedTech(e.target.value)}
                         className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 outline-none text-xs bg-slate-50 text-slate-800">
-                        {TECHNICIANS.map(t => <option key={t} value={t}>{t}</option>)}
+                        {getTechnicianNames().map(t => <option key={t} value={t}>{t}</option>)}
                       </select>
                     </div>
                     <div className="space-y-1.5">
@@ -360,15 +368,23 @@ export default function Appointments() {
                       className="w-full px-3.5 py-2.5 rounded-lg border border-slate-200 outline-none text-xs bg-slate-50/50 resize-none text-slate-800" />
                   </div>
 
-                  <div className="border-t border-slate-100 pt-4 flex space-x-3">
-                    <button type="button" onClick={() => setIsSchedulerOpen(false)}
-                      className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold py-3.5 rounded-lg transition">
-                      Cancel
-                    </button>
-                    <button type="submit" disabled={saving}
-                      className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-xs font-bold py-3.5 rounded-lg transition shadow-md shadow-indigo-100">
-                      {saving ? 'Saving…' : 'Confirm Dispatch'}
-                    </button>
+                  <div className="border-t border-slate-100 pt-4 flex flex-col space-y-3">
+                    {saveError && (
+                      <div className="flex items-center space-x-2 text-xs text-red-600 bg-red-50 border border-red-100 rounded-lg px-3 py-2">
+                        <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                        <span>{saveError}</span>
+                      </div>
+                    )}
+                    <div className="flex space-x-3">
+                      <button type="button" onClick={() => setIsSchedulerOpen(false)}
+                        className="flex-1 border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-bold py-3.5 rounded-lg transition">
+                        Cancel
+                      </button>
+                      <button type="submit" disabled={saving}
+                        className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-300 text-white text-xs font-bold py-3.5 rounded-lg transition shadow-md shadow-indigo-100">
+                        {saving ? 'Saving…' : 'Confirm Dispatch'}
+                      </button>
+                    </div>
                   </div>
                 </form>
               )}
