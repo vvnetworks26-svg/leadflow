@@ -44,8 +44,11 @@ import { detectIndustry }                              from './industry-profiles
 import { planNextMove }                                from './conversation-planner';
 import { OrganizationModel }                           from '../models/Organization.model';
 import { BusinessModel }                               from '../models/Business.model';
+import { BusinessIdentityService }                     from '../business-identity/BusinessIdentityService';
+import { ResponseEngine }                              from '../response-engine/ResponseEngine';
+import { PromptAssembler }                             from '../prompt-assembly/PromptAssembler';
 import { logger }                                      from '../utils/logger';
-import type { ConversationPlan, RichConversationMemory } from './types';
+import type { ConversationPlan as LegacyConversationPlan, RichConversationMemory } from './types';
 
 // ─── Org context loader ───────────────────────────────────────────────────────
 
@@ -173,16 +176,94 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     turnCount,
   });
 
-  const { system, knowledgeBlock } = buildSystemPrompt({
-    org:             orgContext,
-    stage:           nextStage,
-    memory:          updatedMemory,
-    score:           qualification,
-    recommendations,
-    knowledgeHits,
-    currentPage,
-    plan,
-  });
+  // ── 9b. Layer 1: Business Identity (async load, cached) ───────────────────
+  const identity = await BusinessIdentityService.load(organizationId);
+
+  // ── 9b2. Adapt legacy plan to Layer 3 shape ───────────────────────────────
+  const l3Plan = adaptToL3Plan(plan, nextStage);
+
+  // ── 9c. Layer 4: Response Engine → ResponseBlueprint ────────────────────
+  const blueprint = identity
+    ? ResponseEngine.buildBlueprint({
+        plan:            l3Plan,
+        identity,
+        stage:           nextStage,
+        memory:          richMemory,
+        intent:          {
+          id: `${conversationId}-${turnCount}`,
+          category:    mapToIntentCategory(intent.intent),
+          subCategory: '',
+          confidenceLevel: 'high',
+          urgency:     'normal',
+          detectedService: null,
+          entities:    [],
+          candidates:  [],
+          reasoning:   '',
+          blueprintId: null,
+          requiresHuman:       false,
+          requiresClarification:false,
+          rawMessage:  userMessage,
+          timestamp:   new Date(),
+        },
+        qualification,
+        recommendations,
+        workflowState:   nextStage === 'booking' ? 'booking_in_progress'
+                       : nextStage === 'completed' ? 'completed'
+                       : nextStage === 'escalated' ? 'escalating'
+                       : 'collecting_info',
+      })
+    : null;
+
+  // ── 9d. Layer 5: Prompt Assembler → RendererPrompt ───────────────────────
+  let system: string;
+  let knowledgeBlock: string;
+
+  if (identity && blueprint) {
+    const rendererPrompt = PromptAssembler.build({
+      identity,
+      plan:            l3Plan,
+      blueprint,
+      memory:          richMemory,
+      qualification,
+      intent:          {
+        id: `${conversationId}-${turnCount}`,
+        category:    mapToIntentCategory(intent.intent),
+        subCategory: '',
+        confidenceLevel: 'high',
+        urgency:     'normal',
+        detectedService: null,
+        entities:    [],
+        candidates:  [],
+        reasoning:   '',
+        blueprintId: null,
+        requiresHuman:       false,
+        requiresClarification:false,
+        rawMessage:  userMessage,
+        timestamp:   new Date(),
+      },
+      knowledgeHits,
+      recommendations,
+      history,
+      currentPage,
+      stage:           nextStage,
+    });
+    system         = rendererPrompt.systemPrompt;
+    knowledgeBlock = rendererPrompt.knowledgeBlock;
+  } else {
+    // Fallback to legacy prompt builder when identity not available
+    const legacy = buildSystemPrompt({
+      org:             orgContext,
+      stage:           nextStage,
+      memory:          updatedMemory,
+      score:           qualification,
+      recommendations,
+      knowledgeHits,
+      currentPage,
+      plan,
+    });
+    system         = legacy.system;
+    knowledgeBlock = legacy.knowledgeBlock;
+  }
 
   // ── 10. Gemini call ──────────────────────────────────────────────────────
   let reply: string;
@@ -272,6 +353,86 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   };
 }
 
+// ─── Legacy plan → Layer 3 plan adapter ──────────────────────────────────────
+
+import type { ConversationPlan as L3ConversationPlan } from '../conversation-engine/types';
+
+/**
+ * Converts the legacy ai/types ConversationPlan (from planNextMove) into the
+ * Layer 3 ConversationPlan shape expected by ResponseEngine and PromptAssembler.
+ */
+function adaptToL3Plan(
+  legacyPlan: LegacyConversationPlan,
+  stage:      ConversationStage,
+): L3ConversationPlan {
+  const STD_RECOVERY = {
+    onAmbiguity: 'clarify_intent' as const,
+    onRepeat: 'clarify_intent' as const,
+    onContradiction: 'clarify_intent' as const,
+    onTopicChange: 'build_rapport' as const,
+    preserveContext: true,
+  };
+
+  // Map legacy priority to Layer 3 priority
+  const priority = legacyPlan.priority ?? 'medium';
+
+  // Derive a Layer 3 objective from the legacy plan
+  const objective = legacyPlan.fieldTargeted
+    ? (`collect_${legacyPlan.fieldTargeted.replace('Collected', '')}` as any)
+    : stage === 'booking'    ? 'offer_appointment'
+    : stage === 'completed'  ? 'complete_conversation'
+    : stage === 'escalated'  ? 'escalate_to_human'
+    : stage === 'recommendation' ? 'offer_recommendation'
+    : 'build_rapport';
+
+  const workflowState = stage === 'booking'    ? 'booking_in_progress'
+                      : stage === 'completed'  ? 'completed'
+                      : stage === 'escalated'  ? 'escalating'
+                      : 'collecting_info';
+
+  return {
+    objective,
+    reason:             legacyPlan.nextGoal || `Pursuing: ${objective}`,
+    requiredField:      legacyPlan.fieldTargeted ?? null,
+    questionType:       'open',
+    priority:           priority as 'critical' | 'high' | 'medium' | 'low',
+    allowedTools:       [],
+    nextState:          workflowState,
+    fallbackState:      'collecting_info',
+    completionCriteria: legacyPlan.fieldTargeted ? [`${legacyPlan.fieldTargeted}`] : [],
+    recoveryStrategy:   STD_RECOVERY,
+    blueprintId:        null,
+    ruleApplied:        null,
+    isTerminal:         stage === 'completed' || stage === 'escalated',
+    // Carry the original question for the humanizer
+    ...(legacyPlan.questionToAsk ? { questionToAsk: legacyPlan.questionToAsk } : {}),
+  } as L3ConversationPlan;
+}
+
+/**
+ * Maps the legacy ai/types IntentType to the Layer 2 IntentCategory.
+ * Needed to bridge the legacy classifier output to Layer 4/5 interfaces.
+ */
+function mapToIntentCategory(intentType: string): import('../intent-engine/types').IntentCategory {
+  const map: Record<string, import('../intent-engine/types').IntentCategory> = {
+    Booking:    'book_appointment',
+    Demo:       'book_appointment',
+    Pricing:    'request_estimate',
+    Support:    'repair',
+    Objection:  'complaint',
+    Greeting:   'unknown',
+    Question:   'general_question',
+    Feature:    'general_question',
+    Technical:  'general_question',
+    Comparison: 'general_question',
+    Automation: 'general_question',
+    Website:    'general_question',
+    LeadFlow:   'general_question',
+    Unknown:    'unknown',
+  };
+  return map[intentType] ?? 'unknown';
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function buildBlockedOutput(
@@ -295,7 +456,7 @@ function buildFallbackReply(
   stage:  ConversationStage,
   memory: OrchestratorInput['memory'],
   org:    OrgContext,
-  plan?:  ConversationPlan,
+  plan?:  LegacyConversationPlan,
 ): string {
   // Priority 1: planner has a concrete question — use it directly.
   // This is the primary path when Gemini is unavailable.
