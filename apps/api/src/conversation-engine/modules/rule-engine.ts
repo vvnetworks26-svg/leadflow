@@ -1,6 +1,10 @@
 /**
  * Rule Engine — evaluates business rules and returns the highest-priority override.
  * Rules fire before any objective selection. Pure function. No LLM.
+ *
+ * BUG-M3 FIX: `nowMs` is now injectable via RuleContext.
+ * Defaults to Date.now() so production code requires no changes.
+ * Tests can pass a fixed timestamp to test business_closed rule deterministically.
  */
 import type {
   BusinessRule, ConversationObjective, WorkflowState,
@@ -18,6 +22,8 @@ export interface RuleContext {
   businessHours:BusinessHours;
   timezone:     string;
   rules:        readonly BusinessRule[];
+  /** Injectable clock — defaults to Date.now() (BUG-M3 fix) */
+  nowMs?:       number;
 }
 
 export interface RuleResult {
@@ -58,7 +64,7 @@ function testTrigger(rule: BusinessRule, ctx: RuleContext): boolean {
     case 'urgency_critical':       return ctx.urgency === 'critical';
     case 'urgency_emergency':      return ctx.urgency === 'emergency';
     case 'customer_wants_human':   return ctx.requiresHuman || ctx.intent === 'human_representative';
-    case 'business_closed':        return !isOpen(ctx.businessHours, ctx.timezone);
+    case 'business_closed':        return !isOpen(ctx.businessHours, ctx.timezone, ctx.nowMs !== undefined ? new Date(ctx.nowMs) : new Date());
     case 'intent_complaint':       return ctx.intent === 'complaint';
     case 'intent_billing':         return ctx.intent === 'billing_question';
     case 'confidence_low':         return false;   // evaluated externally
