@@ -1,12 +1,31 @@
 /**
  * memory-engine/MemoryScorer.ts
  * Builds MemoryItem objects from raw field data. Pure function.
+ *
+ * BUG-H1 FIX: IDs are now deterministic (djb2 hash of key).
+ * The same field always produces the same ID within a session,
+ * enabling stable deduplication and conflict resolution across
+ * multiple MemoryEngine.process() calls.
  */
-import { randomUUID } from 'crypto';
 import type { MemoryItem } from './MemoryTypes';
 import { classifyField }          from './MemoryClassifier';
 import { scoreImportance, toImportanceLevel } from './MemoryImportance';
 import { assignRetention }        from './MemoryRetention';
+
+/**
+ * Deterministic ID from field key using djb2 hash.
+ * Identical to stableMemoryId() in tool-orchestration/MemoryBugFixes.ts
+ * but kept inline here to avoid a cross-layer import.
+ */
+function deterministicId(key: string): string {
+  let hash = 5381;
+  for (let i = 0; i < key.length; i++) {
+    hash = ((hash << 5) + hash) + key.charCodeAt(i);
+    hash = hash & hash; // keep 32-bit
+  }
+  const hex = (hash >>> 0).toString(16).padStart(8, '0');
+  return `mem-${hex}`;
+}
 
 export function buildMemoryItem(params: {
   key:        string;
@@ -23,7 +42,7 @@ export function buildMemoryItem(params: {
   const needsRevalidation = confidence < 50;
 
   return Object.freeze({
-    id:               randomUUID(),
+    id:               deterministicId(key),   // BUG-H1 fix: was randomUUID()
     domain,
     key,
     value,

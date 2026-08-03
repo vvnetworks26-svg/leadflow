@@ -418,7 +418,7 @@ function mapToIntentCategory(intentType: string): import('../intent-engine/types
     Booking:    'book_appointment',
     Demo:       'book_appointment',
     Pricing:    'request_estimate',
-    Support:    'repair',
+    Support:    'general_question',   // BUG-L1 fix: was 'repair' — Support is a general question, not a repair request
     Objection:  'complaint',
     Greeting:   'unknown',
     Question:   'general_question',
