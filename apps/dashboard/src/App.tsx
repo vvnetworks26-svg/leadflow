@@ -9,21 +9,29 @@ import DashboardLayout from './layouts/DashboardLayout';
 // Auth pages
 import SignIn from './pages/auth/SignIn';
 import SignUp from './pages/auth/SignUp';
+import ForgotPassword from './pages/auth/ForgotPassword';
 
-// Dashboard views
+// Dashboard pages
 import Overview from './pages/dashboard/Overview';
 import Leads from './pages/dashboard/Leads';
 import Appointments from './pages/dashboard/Appointments';
 import Conversations from './pages/dashboard/Conversations';
+import Analytics from './pages/dashboard/Analytics';
+import Customers from './pages/dashboard/Customers';
 import Settings from './pages/dashboard/Settings';
+import Notifications from './pages/dashboard/Notifications';
+import KnowledgeBase from './pages/dashboard/KnowledgeBase';
 import Billing from './pages/dashboard/Billing';
+import Profile from './pages/dashboard/Profile';
+import AISettings from './pages/dashboard/AISettings';
+import WidgetSettings from './pages/dashboard/WidgetSettings';
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
 
 /**
  * RequireAuth — wraps protected routes.
- * While auth is loading, shows a spinner.
- * Once loaded, if the user is not signed in, redirects to /sign-in.
+ * While auth is loading shows a spinner.
+ * Once loaded, unauthenticated users are redirected to /sign-in.
  */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn } = useUser();
@@ -47,8 +55,8 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * RedirectIfAuth — wraps public-only routes (login, register).
- * If the user is already signed in, redirects them to the dashboard.
+ * RedirectIfAuth — wraps public-only routes (login, register, forgot-password).
+ * Authenticated users are redirected to the dashboard.
  */
 function RedirectIfAuth({ children }: { children: React.ReactNode }) {
   const { isLoaded, isSignedIn } = useUser();
@@ -70,27 +78,32 @@ export default function App() {
       <AuthProvider>
         <ToastProvider>
           <Routes>
-            {/* Auth routes — redirect to dashboard if already signed in */}
-            <Route path="/sign-in" element={<RedirectIfAuth><SignIn /></RedirectIfAuth>} />
-            <Route path="/sign-up" element={<RedirectIfAuth><SignUp /></RedirectIfAuth>} />
+            {/* ── Auth routes (public only) ── */}
+            <Route path="/sign-in"         element={<RedirectIfAuth><SignIn /></RedirectIfAuth>} />
+            <Route path="/sign-up"         element={<RedirectIfAuth><SignUp /></RedirectIfAuth>} />
+            <Route path="/forgot-password" element={<RedirectIfAuth><ForgotPassword /></RedirectIfAuth>} />
 
-            {/* Protected dashboard routes */}
-            <Route
-              path="/dashboard"
-              element={<RequireAuth><DashboardLayout /></RequireAuth>}
-            >
-              <Route index element={<Overview />} />
-              <Route path="leads" element={<Leads />} />
-              <Route path="appointments" element={<Appointments />} />
-              <Route path="conversations" element={<Conversations />} />
-              <Route path="settings" element={<Settings />} />
-              <Route path="billing" element={<Billing />} />
+            {/* ── Protected dashboard routes ── */}
+            <Route path="/dashboard" element={<RequireAuth><DashboardLayout /></RequireAuth>}>
+              <Route index                  element={<Overview />} />
+              <Route path="inbox"           element={<Conversations />} />
+              <Route path="leads"           element={<Leads />} />
+              <Route path="appointments"    element={<Appointments />} />
+              <Route path="analytics"       element={<Analytics />} />
+              <Route path="customers"       element={<Customers />} />
+              <Route path="settings"        element={<Settings />} />
+              <Route path="notifications"   element={<Notifications />} />
+              <Route path="knowledge-base"  element={<KnowledgeBase />} />
+              <Route path="billing"         element={<Billing />} />
+              <Route path="profile"         element={<Profile />} />
+              <Route path="ai-settings"     element={<AISettings />} />
+              <Route path="widget-settings" element={<WidgetSettings />} />
             </Route>
 
-            {/* Root redirect — unauthenticated users go to sign-in */}
-            <Route path="/" element={<Navigate to="/sign-in" replace />} />
+            {/* ── Root → sign-in ── */}
+            <Route path="/"  element={<Navigate to="/sign-in" replace />} />
 
-            {/* Fallback */}
+            {/* ── Fallback ── */}
             <Route path="*" element={<Navigate to="/sign-in" replace />} />
           </Routes>
         </ToastProvider>

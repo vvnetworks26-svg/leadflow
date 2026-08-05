@@ -1,21 +1,23 @@
 import React, { useState } from 'react';
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom';
 import { useUser, useAuth } from '../context/AuthContext';
-import { 
-  LayoutDashboard, 
-  Users, 
-  Calendar, 
-  MessageSquare, 
-  Settings, 
-  CreditCard, 
-  Menu, 
-  X, 
-  Sparkles, 
-  LogOut, 
-  Plus, 
-  Bell, 
+import {
+  LayoutDashboard,
+  Users,
+  Calendar,
+  MessageSquare,
+  Settings,
+  CreditCard,
+  Menu,
+  X,
+  Sparkles,
+  LogOut,
+  Bell,
   User as UserIcon,
-  Bot
+  Bot,
+  BarChart3,
+  BookOpen,
+  Code2,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
@@ -32,16 +34,33 @@ export default function DashboardLayout() {
   // DashboardLayout renders only when RequireAuth has already confirmed isSignedIn.
   // No additional redirect needed here.
 
-  const menuItems = [
-    { name: 'Overview', path: '/dashboard', icon: LayoutDashboard },
-    { name: 'Leads', path: '/dashboard/leads', icon: Users },
-    { name: 'Appointments', path: '/dashboard/appointments', icon: Calendar },
-    { name: 'Conversations', path: '/dashboard/conversations', icon: MessageSquare, badge: 'Live' },
-    { name: 'Settings', path: '/dashboard/settings', icon: Settings },
-    { name: 'Billing', path: '/dashboard/billing', icon: CreditCard, disabled: true, badge: 'Soon' },
+  const menuItems: Array<{
+    name: string;
+    path: string;
+    icon: React.ComponentType<{ className?: string }>;
+    badge?: string;
+    disabled?: boolean;
+  }> = [
+    { name: 'Overview',          path: '/dashboard',                icon: LayoutDashboard },
+    { name: 'Inbox',             path: '/dashboard/inbox',          icon: MessageSquare,  badge: 'Live' },
+    { name: 'Leads',             path: '/dashboard/leads',          icon: Users },
+    { name: 'Appointments',      path: '/dashboard/appointments',   icon: Calendar },
+    { name: 'Analytics',         path: '/dashboard/analytics',      icon: BarChart3 },
+    { name: 'Customers',         path: '/dashboard/customers',      icon: Users },
+    { name: 'Business Settings', path: '/dashboard/settings',       icon: Settings },
+    { name: 'Notifications',     path: '/dashboard/notifications',  icon: Bell },
+    { name: 'Knowledge Base',    path: '/dashboard/knowledge-base', icon: BookOpen },
+    { name: 'AI Settings',       path: '/dashboard/ai-settings',    icon: Bot },
+    { name: 'Widget Settings',   path: '/dashboard/widget-settings',icon: Code2 },
+    { name: 'Billing',           path: '/dashboard/billing',        icon: CreditCard },
+    { name: 'Profile',           path: '/dashboard/profile',        icon: UserIcon },
   ];
 
-  const currentActiveName = menuItems.find(item => item.path === location.pathname)?.name || 'Dashboard';
+  const currentActiveName = menuItems.find(item =>
+    item.path === '/dashboard'
+      ? location.pathname === '/dashboard'
+      : location.pathname.startsWith(item.path)
+  )?.name || 'Dashboard';
 
   const handleSignOut = async () => {
     await signOut();
@@ -65,7 +84,9 @@ export default function DashboardLayout() {
         <nav className="flex-1 space-y-1">
           {menuItems.map((item) => {
             const Icon = item.icon;
-            const isActive = location.pathname === item.path;
+            const isActive = item.path === '/dashboard'
+              ? location.pathname === '/dashboard'
+              : location.pathname.startsWith(item.path);
             
             if (item.disabled) {
               return (
@@ -302,7 +323,9 @@ export default function DashboardLayout() {
                 <nav className="space-y-1">
                   {menuItems.map((item) => {
                     const Icon = item.icon;
-                    const isActive = location.pathname === item.path;
+                    const isActive = item.path === '/dashboard'
+                      ? location.pathname === '/dashboard'
+                      : location.pathname.startsWith(item.path);
 
                     if (item.disabled) {
                       return (
