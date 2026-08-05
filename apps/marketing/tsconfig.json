@@ -9,6 +9,7 @@
     "moduleDetection": "force",
     "allowJs": true,
     "jsx": "react-jsx",
+    "types": ["vite/client"],
     "allowImportingTsExtensions": true,
     "noEmit": true
   }

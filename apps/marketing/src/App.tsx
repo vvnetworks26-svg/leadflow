@@ -1,10 +1,22 @@
 import React from 'react';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+
+import Home from './pages/Home';
+import Testimonials from './pages/Testimonials';
+import Blog from './pages/Blog';
+import Demo from './pages/Demo';
 
 export default function App() {
   return (
-    <main style={{ fontFamily: 'sans-serif', textAlign: 'center', paddingTop: '4rem' }}>
-      <h1>LeadFlow</h1>
-      <p>Marketing site — coming soon.</p>
-    </main>
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/testimonials" element={<Testimonials />} />
+        <Route path="/blog" element={<Blog />} />
+        <Route path="/demo" element={<Demo />} />
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </BrowserRouter>
   );
 }

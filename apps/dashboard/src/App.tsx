@@ -1,26 +1,22 @@
 import React from 'react';
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useUser } from './context/AuthContext';
 import { ToastProvider } from './context/ToastContext';
 
 // Layout
 import DashboardLayout from './layouts/DashboardLayout';
 
-// Pages
-import Landing from './pages/Landing';
+// Auth pages
 import SignIn from './pages/auth/SignIn';
 import SignUp from './pages/auth/SignUp';
 
-// Dashboard Views
+// Dashboard views
 import Overview from './pages/dashboard/Overview';
 import Leads from './pages/dashboard/Leads';
 import Appointments from './pages/dashboard/Appointments';
 import Conversations from './pages/dashboard/Conversations';
 import Settings from './pages/dashboard/Settings';
 import Billing from './pages/dashboard/Billing';
-
-// Chat Widget
-import { ChatWidget } from './components/Chat/ChatWidget';
 
 // ─── Route guards ─────────────────────────────────────────────────────────────
 
@@ -66,15 +62,6 @@ function RedirectIfAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ─── Chat widget — only on public pages ──────────────────────────────────────
-
-function ChatWidgetPortal() {
-  const location = useLocation();
-  const isDashboard = location.pathname.startsWith('/dashboard');
-  if (isDashboard) return null;
-  return <ChatWidget />;
-}
-
 // ─── App ──────────────────────────────────────────────────────────────────────
 
 export default function App() {
@@ -82,11 +69,7 @@ export default function App() {
     <BrowserRouter>
       <AuthProvider>
         <ToastProvider>
-          <ChatWidgetPortal />
           <Routes>
-            {/* Public routes */}
-            <Route path="/" element={<Landing />} />
-
             {/* Auth routes — redirect to dashboard if already signed in */}
             <Route path="/sign-in" element={<RedirectIfAuth><SignIn /></RedirectIfAuth>} />
             <Route path="/sign-up" element={<RedirectIfAuth><SignUp /></RedirectIfAuth>} />
@@ -104,8 +87,11 @@ export default function App() {
               <Route path="billing" element={<Billing />} />
             </Route>
 
+            {/* Root redirect — unauthenticated users go to sign-in */}
+            <Route path="/" element={<Navigate to="/sign-in" replace />} />
+
             {/* Fallback */}
-            <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path="*" element={<Navigate to="/sign-in" replace />} />
           </Routes>
         </ToastProvider>
       </AuthProvider>
