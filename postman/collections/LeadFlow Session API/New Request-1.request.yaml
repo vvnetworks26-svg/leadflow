@@ -1,0 +1,5 @@
+$kind: http-request
+name: New Request
+url: http://localhost:4000/api/v1/widget/vijay-kumar-s-organization/session/cd68ee68-050b-46e5-b3f2-a0a5cf938431
+method: DELETE
+order: 4499002300388551

@@ -74,7 +74,7 @@ design document (design.md sections 1–14).
   - Return 200 `{ status: 'ok' }`
   - _Verifies: REQ-4_
 
-- [ ] 6. **Redesign rate limiting in `widget.routes.ts`**
+- [x] 6. **Redesign rate limiting in `widget.routes.ts`**
   - Remove `router.use(widgetLimiter)` blanket
   - Create independent `rateLimit()` instances for each route family:
     - `sessionCreateLimiter`: `{ windowMs: 60_000, max: 10, keyGenerator: (req) => req.ip + '::' + req.params.token }`
@@ -91,7 +91,7 @@ design document (design.md sections 1–14).
 
 ## Phase 3 — Chat Endpoint Upgrade (Backend)
 
-- [ ] 7. **Update `widgetChat` to accept `widgetSessionId` + `messageType`**
+- [x] 7. **Update `widgetChat` to accept `widgetSessionId` + `messageType`**
   - Accept new optional fields in request body: `widgetSessionId?: string`, `messageType?: 'greeting' | 'resume' | 'message'`
   - Backward compat: when `widgetSessionId` absent, fall back to existing `conversationId` lookup path — no change to existing behavior
   - When `widgetSessionId` present: look up session via `{ widgetSessionId, organizationId }` compound index

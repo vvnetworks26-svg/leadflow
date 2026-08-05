@@ -311,47 +311,110 @@ const MAX_WIDGET_HISTORY = 30;
  * POST /api/v1/widget/:token/chat
  * Unauthenticated widget conversation turn.
  * The token resolves the organization — no JWT required.
+ *
+ * Accepts both legacy body shape `{ message, conversationId, currentPage }` and the
+ * new shape `{ message, widgetSessionId, messageType, currentPage }`.
+ * When `widgetSessionId` is present it takes precedence over `conversationId` for
+ * session lookup; when absent the handler falls back to the existing `conversationId`
+ * path so all existing callers continue to work without changes (REQ-14.2).
+ *
+ * `messageType` replaces the `__init__` / `__resume__` sentinel strings (design §3.4):
+ *   - 'greeting' → same as `message === '__init__'`: skip user history entry
+ *   - 'resume'   → inject '__resume__' as the userMessage so the orchestrator can
+ *                  generate a personalised resumption greeting (Task 9 handles the
+ *                  orchestrator side); no user history entry stored
+ *   - 'message'  → normal turn (default when messageType is absent)
+ *
+ * The legacy `__init__` sentinel string is still detected for backward compat:
+ *   isInit = message.trim() === '__init__' || messageType === 'greeting'
+ *
+ * Verifies: REQ-7.3, REQ-14.2, design §3.4
  */
 export async function widgetChat(req: Request, res: Response, next: NextFunction) {
   try {
-    const { message, conversationId, currentPage } = req.body as {
-      message:        string;
-      conversationId: string;
-      currentPage?:   string;
+    const {
+      message,
+      conversationId,
+      widgetSessionId,
+      messageType,
+      currentPage,
+    } = req.body as {
+      message:          string;
+      conversationId?:  string;
+      widgetSessionId?: string;
+      messageType?:     'greeting' | 'resume' | 'message';
+      currentPage?:     string;
     };
+
     if (!message || !message.trim()) throw new ApiError(422, 'message is required', 'VALIDATION_ERROR');
-    if (!conversationId)             throw new ApiError(422, 'conversationId is required', 'VALIDATION_ERROR');
+
+    // When neither identifier is present the request is invalid (legacy requirement).
+    if (!widgetSessionId && !conversationId) {
+      throw new ApiError(422, 'conversationId is required', 'VALIDATION_ERROR');
+    }
 
     const orgId = await resolveOrg(req.params.token);
 
-    // Load or create session
-    let session = await AIConversationSessionModel.findOne({ conversationId, organizationId: orgId });
-    if (!session) {
-      session = await AIConversationSessionModel.create({
-        organizationId: orgId,
-        conversationId,
-        stage:          'greeting' as ConversationStage,
-        memory:         emptyMemory(),
-        history:        [],
-        qualification:  null,
-        turnCount:      0,
-        lastActivity:   new Date(),
-      });
+    // ── Session lookup ─────────────────────────────────────────────────────────
+    // Path A (new): widgetSessionId present → compound-index lookup (REQ-11.5).
+    // Path B (legacy): widgetSessionId absent → conversationId lookup (REQ-14.2).
+    let session;
+
+    if (widgetSessionId) {
+      // New path: look up via { widgetSessionId, organizationId } compound index.
+      session = await AIConversationSessionModel.findOne({ widgetSessionId, organizationId: orgId });
+
+      if (!session) {
+        // Session was created via POST /session but not found — treat as error.
+        throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+      }
+    } else {
+      // Legacy path: unchanged behaviour — load or lazily create by conversationId.
+      session = await AIConversationSessionModel.findOne({ conversationId, organizationId: orgId });
+      if (!session) {
+        session = await AIConversationSessionModel.create({
+          organizationId: orgId,
+          conversationId,
+          stage:          'greeting' as ConversationStage,
+          memory:         emptyMemory(),
+          history:        [],
+          qualification:  null,
+          turnCount:      0,
+          lastActivity:   new Date(),
+        });
+      }
     }
 
+    // ── Sentinel / messageType mapping ─────────────────────────────────────────
     /**
-     * __init__ is a synthetic sentinel sent by the widget on first open to
-     * request the AI's opening greeting without the user having typed anything.
-     * We treat it as a standard greeting turn so the orchestrator generates a
-     * welcome message; we just don't echo it back into the history as a user
-     * message.
+     * isInit  — true for the opening greeting turn: no user history entry is stored.
+     * isResume — true for the resume sentinel: inject '__resume__' so the orchestrator
+     *            (Task 9) can generate a personalised returning-visitor greeting;
+     *            also skips the user history entry.
+     *
+     * Legacy __init__ string is still honoured for backward compat (REQ-14.2):
+     *   isInit = message.trim() === '__init__' || messageType === 'greeting'
      */
-    const isInit       = message.trim() === '__init__';
-    const userMessage  = isInit ? 'Hello' : message.trim();
+    const isInit   = message.trim() === '__init__' || messageType === 'greeting';
+    const isResume = messageType === 'resume';
+
+    // Derive the message to pass to the orchestrator.
+    let userMessage: string;
+    if (isResume) {
+      userMessage = '__resume__';   // Task 9 will handle this sentinel in runOrchestrator
+    } else if (isInit) {
+      userMessage = 'Hello';
+    } else {
+      userMessage = message.trim();
+    }
+
+    // The conversationId the orchestrator receives comes from the session document
+    // (never blindly from the client), keeping internal identifiers server-authoritative.
+    const sessionConversationId = session.conversationId;
 
     const output = await runOrchestrator({
       organizationId: orgId,
-      conversationId,
+      conversationId: sessionConversationId,
       userMessage,
       history:        session.history,
       memory:         session.memory as any ?? emptyMemory(),
@@ -359,11 +422,13 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
       currentPage,
     });
 
+    // ── History append ─────────────────────────────────────────────────────────
+    // For init and resume turns only store the assistant reply — no user turn.
+    // For real messages, store both sides.
+    const isSilentTurn = isInit || isResume;
     const newHistory = [
       ...session.history,
-      // For __init__ (greeting), only store the assistant reply — no user turn.
-      // For real messages, store both sides.
-      ...(isInit
+      ...(isSilentTurn
         ? [{ role: 'assistant' as const, content: output.reply }]
         : [
             { role: 'user' as const,      content: message },
@@ -373,20 +438,21 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
     ].slice(-MAX_WIDGET_HISTORY);
 
     await AIConversationSessionModel.findByIdAndUpdate(session._id, {
-      stage:        output.updatedStage,
-      memory:       output.updatedMemory,
-      history:      newHistory,
-      qualification:output.qualification,
-      turnCount:    session.turnCount + 1,
-      lastActivity: new Date(),
+      stage:         output.updatedStage,
+      memory:        output.updatedMemory,
+      history:       newHistory,
+      qualification: output.qualification,
+      turnCount:     session.turnCount + 1,
+      lastActivity:  new Date(),
     });
 
+    // Response schema is unchanged (REQ-14.2).
     res.json({
       status: 'ok',
       data: {
-        reply:           output.reply,
-        stage:           output.updatedStage,
-        bookingTriggered:output.bookingTriggered,
+        reply:            output.reply,
+        stage:            output.updatedStage,
+        bookingTriggered: output.bookingTriggered,
       },
     });
   } catch (e) { next(e); }
