@@ -24,13 +24,14 @@
     "express": "^4.21.2",
     "express-mongo-sanitize": "^2.2.0",
     "express-rate-limit": "^7.5.0",
-    "googleapis": "^144.0.0",
+    "googleapis": "^174.0.1",
     "helmet": "^8.0.0",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.8.4",
     "node-cron": "^4.0.7",
     "pino": "^9.5.0",
     "pino-pretty": "^13.0.0",
+    "react-router-dom": "7.11.0",
     "zod": "^3.24.1"
   },
   "devDependencies": {
