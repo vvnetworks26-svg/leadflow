@@ -1,17 +1,10 @@
 {
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "skipLibCheck": true,
-    "moduleResolution": "bundler",
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "allowJs": true,
-    "jsx": "react-jsx",
-    "types": ["vite/client"],
-    "allowImportingTsExtensions": true,
-    "noEmit": true,
-    "strict": true
+    "paths": {
+      "@leadflow/types":   ["../../packages/types/src/index.ts"],
+      "@leadflow/shared":  ["../../packages/shared/src/index.ts"],
+      "@leadflow/shared/widgetApiClient": ["../../packages/shared/src/widgetApiClient.ts"]
+    }
   }
 }

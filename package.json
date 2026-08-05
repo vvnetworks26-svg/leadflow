@@ -12,6 +12,8 @@
     "apps/widget",
     "apps/api",
     "apps/docs",
+    "packages/types",
+    "packages/shared",
     "packages/widget-sdk"
   ],
   "scripts": {
