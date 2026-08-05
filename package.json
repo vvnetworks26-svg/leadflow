@@ -9,6 +9,7 @@
   "workspaces": [
     "apps/dashboard",
     "apps/marketing",
+    "apps/widget",
     "apps/api",
     "apps/docs",
     "packages/widget-sdk"
@@ -19,9 +20,11 @@
     "preview":           "npm run preview --workspace=apps/dashboard",
     "dev:marketing":     "npm run dev --workspace=apps/marketing",
     "build:marketing":   "npm run build --workspace=apps/marketing",
+    "dev:widget":        "npm run dev --workspace=apps/widget",
+    "build:widget-app":  "npm run build --workspace=apps/widget",
     "dev:api":           "npm run dev --workspace=apps/api",
     "build:api":         "npm run build --workspace=apps/api",
-    "build:widget":      "npm run build --workspace=packages/widget-sdk",
+    "build:widget-sdk":  "npm run build --workspace=packages/widget-sdk",
     "build:all":         "npm run build --workspaces --if-present",
     "lint":              "npm run lint --workspaces --if-present",
     "clean":             "npm run clean --workspaces --if-present"

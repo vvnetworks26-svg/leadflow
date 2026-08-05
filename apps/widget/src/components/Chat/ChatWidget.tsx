@@ -5,6 +5,7 @@ import { ChatWindow } from './ChatWindow';
 import { useChat } from '../../hooks/useChat';
 import { useConversation } from '../../hooks/useConversation';
 
+
 /**
  * ChatWidget — floating launcher + expandable chat window.
  * Pure presentation layer. All conversation logic lives in useConversation → backend.
