@@ -6,7 +6,7 @@
   "type": "commonjs",
   "main": "dist/server.js",
   "engines": {
-    "node": "20.x"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "tsx watch src/server.ts",
