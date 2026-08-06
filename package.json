@@ -4,33 +4,48 @@
   "version": "0.0.0",
   "type": "module",
   "engines": {
-    "node": ">=20.0.0"
+    "node": "24.x",
+    "npm":  ">=10.0.0"
   },
+  "workspaces": [
+    "apps/dashboard",
+    "apps/marketing",
+    "apps/widget",
+    "apps/api",
+    "apps/docs",
+    "packages/types",
+    "packages/shared",
+    "packages/widget-sdk"
+  ],
   "scripts": {
-    "dev":     "vite --port=3000 --host=0.0.0.0",
-    "build":   "vite build",
-    "preview": "vite preview",
-    "clean":   "rm -rf dist",
-    "lint":    "tsc -p tsconfig.app.json --noEmit"
-  },
-  "dependencies": {
-    "@google/genai":       "^2.4.0",
-    "axios":               "^1.18.1",
-    "lucide-react":        "^0.546.0",
-    "motion":              "^12.23.24",
-    "react":               "^19.0.1",
-    "react-dom":           "^19.0.1",
-    "react-router-dom":    "^7.18.0"
+    "dev":               "npm run dev --workspace=apps/dashboard",
+    "build":             "npm run build --workspace=apps/dashboard",
+    "preview":           "npm run preview --workspace=apps/dashboard",
+    "dev:marketing":     "npm run dev --workspace=apps/marketing",
+    "build:marketing":   "npm run build --workspace=apps/marketing",
+    "dev:widget":        "npm run dev --workspace=apps/widget",
+    "build:widget-app":  "npm run build --workspace=apps/widget",
+    "dev:api":           "npm run dev --workspace=apps/api",
+    "build:api":         "npm run build --workspace=apps/api",
+    "build:widget-sdk":  "npm run build --workspace=packages/widget-sdk",
+    "build:all":         "npm run build --workspaces --if-present",
+    "lint":              "npm run lint --workspaces --if-present",
+    "clean":             "npm run clean --workspaces --if-present"
   },
   "devDependencies": {
-    "@tailwindcss/vite":   "^4.1.14",
-    "@types/node":         "^22.14.0",
-    "@vitejs/plugin-react":"^5.0.4",
-    "autoprefixer":        "^10.4.21",
-    "esbuild":             "^0.25.0",
-    "tailwindcss":         "^4.1.14",
-    "tsx":                 "^4.21.0",
-    "typescript":          "~5.8.2",
-    "vite":                "^6.2.3"
+    "typescript": "~5.8.2"
+  },
+  "overrides": {
+    "rollup": "4.62.2"
+  },
+  "optionalDependencies": {
+    "@rollup/rollup-linux-x64-gnu":  "4.62.2",
+    "@rollup/rollup-linux-x64-musl": "4.62.2",
+    "@rollup/rollup-linux-arm64-gnu":  "4.62.2",
+    "@rollup/rollup-linux-arm64-musl": "4.62.2",
+    "lightningcss-linux-x64-gnu": "1.32.0",
+    "lightningcss-linux-x64-musl": "1.32.0",
+    "lightningcss-linux-arm64-gnu": "1.32.0",
+    "lightningcss-linux-arm64-musl": "1.32.0"
   }
 }

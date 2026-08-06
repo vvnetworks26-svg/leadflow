@@ -11,28 +11,32 @@ jobs:
   api:
     name: API — lint & build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: apps/api
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
-          cache-dependency-path: apps/api/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
+      - name: Install dependencies (root)
         run: npm ci
 
+      - name: Verify native binaries
+        run: |
+          echo "Verifying rollup installation..."
+          npm ls rollup || echo "Warning: rollup check failed"
+          echo "Verifying esbuild installation..."
+          npm ls esbuild || echo "Warning: esbuild check failed"
+
       - name: Type-check (lint)
-        run: npm run lint
+        run: npm run lint --workspace=apps/api
 
       - name: Build
-        run: npm run build
+        run: npm run build --workspace=apps/api
 
   # ── Frontend type-check & build ──────────────────────────────────────────────
   frontend:
@@ -42,15 +46,22 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: package-lock.json
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Verify native binaries (Rollup, LightningCSS)
+        run: |
+          echo "Verifying rollup installation..."
+          npm ls rollup || echo "Warning: rollup check failed"
+          echo "Verifying lightningcss installation..."
+          npm ls lightningcss || echo "Warning: lightningcss check failed"
 
       - name: Type-check (lint)
         run: npm run lint
@@ -64,25 +75,27 @@ jobs:
   widget-sdk:
     name: Widget SDK — lint & build
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: packages/widget-sdk
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Use Node.js 20
+      - name: Use Node.js 24
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
-          cache-dependency-path: packages/widget-sdk/package-lock.json
+          cache-dependency-path: package-lock.json
 
-      - name: Install dependencies
+      - name: Install dependencies (root)
         run: npm ci
 
+      - name: Verify native binaries
+        run: |
+          echo "Verifying esbuild installation..."
+          npm ls esbuild || echo "Warning: esbuild check failed"
+
       - name: Lint
-        run: npm run lint
+        run: npm run lint --workspace=packages/widget-sdk
 
       - name: Build
-        run: npm run build
+        run: npm run build --workspace=packages/widget-sdk

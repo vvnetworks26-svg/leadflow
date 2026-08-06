@@ -1,0 +1,10 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "paths": {
+      "@leadflow/types":   ["../../packages/types/src/index.ts"],
+      "@leadflow/shared":  ["../../packages/shared/src/index.ts"],
+      "@leadflow/shared/widgetApiClient": ["../../packages/shared/src/widgetApiClient.ts"]
+    }
+  }
+}

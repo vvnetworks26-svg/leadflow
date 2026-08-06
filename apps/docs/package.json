@@ -1,0 +1,10 @@
+{
+  "name": "@leadflow/docs",
+  "private": true,
+  "version": "0.0.0",
+  "description": "LeadFlow documentation site",
+  "scripts": {
+    "dev":   "echo 'Docs site not yet configured'",
+    "build": "echo 'Docs site not yet configured'"
+  }
+}

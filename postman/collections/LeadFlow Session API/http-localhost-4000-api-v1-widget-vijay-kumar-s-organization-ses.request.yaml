@@ -1,0 +1,14 @@
+$kind: http-request
+name: http://localhost:4000/api/v1/widget/vijay-kumar-s-organization/session
+description: ""
+url: http://localhost:4000/api/v1/widget/vijay-kumar-s-organization/session?Content-Type=application/json
+method: POST
+queryParams:
+  - key: Content-Type
+    value: application/json
+    disabled: false
+    description: ""
+body:
+  type: json
+  content: "{}"
+order: 1784266996356
