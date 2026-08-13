@@ -166,6 +166,10 @@ leadflow/
 
 - Node.js 20+
 - MongoDB (local or Atlas cluster)
+- Redis (local or hosted) — required to run the API's async conversation-summary
+  pipeline (BullMQ). Local dev: `brew install redis && brew services start redis`,
+  or `docker run -d -p 6379:6379 redis`. Without it, the API still starts, but
+  conversation summaries never get generated (see `REDIS_URL` below).
 
 ### Frontend
 
@@ -196,7 +200,8 @@ npm install
 
 # Copy environment variables
 cp .env.example .env
-# Fill in MONGODB_URI, JWT_SECRET, JWT_REFRESH_SECRET
+# Fill in MONGODB_URI, JWT_SECRET, JWT_REFRESH_SECRET, REDIS_URL
+# (REDIS_URL needs a real Redis instance running — see Prerequisites above)
 
 # Start the dev server (with file watching)
 npm run dev
@@ -240,6 +245,7 @@ npm run lint      # tsc --noEmit
 | `PORT` | No | `4000` | Port the API server listens on |
 | `API_VERSION` | No | `1.0.0` | Reported in the health endpoint |
 | `MONGODB_URI` | Prod only | — | MongoDB connection string |
+| `REDIS_URL` | Prod only | `redis://localhost:6379` | Redis connection string — backs the BullMQ async conversation-summary pipeline. Local dev needs a real Redis instance running. |
 | `JWT_SECRET` | Prod only | dev default | Access token signing secret (min 32 chars) |
 | `JWT_REFRESH_SECRET` | Prod only | dev default | Refresh token signing secret (min 32 chars) |
 | `JWT_EXPIRES_IN` | No | `15m` | Access token lifetime |
@@ -247,7 +253,7 @@ npm run lint      # tsc --noEmit
 | `CORS_ORIGINS` | No | `http://localhost:3000` | Comma-separated list of allowed origins |
 | `LOG_LEVEL` | No | `info` | Pino log level (`trace`, `debug`, `info`, `warn`, `error`) |
 
-In `development` and `test`, `MONGODB_URI`, `JWT_SECRET`, and `JWT_REFRESH_SECRET` fall back to safe defaults so the server starts without a full `.env` file.
+In `development` and `test`, `MONGODB_URI`, `REDIS_URL`, `JWT_SECRET`, and `JWT_REFRESH_SECRET` fall back to safe defaults so the server starts without a full `.env` file. The `REDIS_URL` default (`redis://localhost:6379`) only actually works if a local Redis instance is running.
 
 ---
 

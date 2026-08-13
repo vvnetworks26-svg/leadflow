@@ -69,6 +69,10 @@ export const env = {
   MONGODB_URI:            requireInProd('MONGODB_URI',           ''),
   JWT_SECRET:             requireInProd('JWT_SECRET',            'dev-secret-change-in-production'),
   JWT_REFRESH_SECRET:     requireInProd('JWT_REFRESH_SECRET',    'dev-refresh-secret-change-in-production'),
+  // BullMQ (ai/pipeline/) requires Redis — local dev needs a real Redis
+  // instance running at this URL (e.g. `redis-server` or `docker run -p
+  // 6379:6379 redis`); the localhost default only works if one is up.
+  REDIS_URL:              requireInProd('REDIS_URL',             'redis://localhost:6379'),
 
   // Optional with sensible defaults
   JWT_EXPIRES_IN:         optional('JWT_EXPIRES_IN',         '15m'),
