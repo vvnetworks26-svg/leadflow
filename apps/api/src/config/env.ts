@@ -80,8 +80,12 @@ export const env = {
   CORS_ORIGINS:           optional('CORS_ORIGINS',           'http://localhost:3000'),
   LOG_LEVEL:              optional('LOG_LEVEL',              'info'),
 
-  // AI — optional; if absent the AI engine uses rule-based fallbacks
+  // AI — optional; if absent the AI engine uses rule-based fallbacks.
+  // GEMINI_MODEL always has a value (defaulted) so ai/gemini.ts never needs
+  // a hardcoded fallback string — see docs.ai.google.dev/gemini-api/docs/models
+  // for current model IDs; they change every few months.
   GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
+  GEMINI_MODEL:   optional('GEMINI_MODEL',   'gemini-3.6-flash'),
 
   // Google Calendar OAuth (optional)
   GOOGLE_CLIENT_ID:     optional('GOOGLE_CLIENT_ID',     ''),
