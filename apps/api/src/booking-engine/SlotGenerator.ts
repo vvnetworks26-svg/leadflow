@@ -12,7 +12,7 @@
 import type { AvailabilityRequest, AvailabilityResponse, AppointmentSlot, BlockedSlot } from './types';
 import type { DaySchedule } from '../business-identity/types';
 import { BusinessHoursService } from './BusinessHours';
-import { formatSlotLabel, utcToLocalIso, safeTimezone } from './TimezoneService';
+import { formatSlotLabel, utcToLocalIso, localToUtcIso, safeTimezone } from './TimezoneService';
 
 const DAYS = ['sunday','monday','tuesday','wednesday','thursday','friday','saturday'] as const;
 type DayKey = typeof DAYS[number];
@@ -77,16 +77,29 @@ function getLocalDateStr(utcMs: number, timezone: string): string {
   }
 }
 
-/** Advance cursor to the local start-of-day for a given timezone */
+/**
+ * Advance cursor to the local start-of-day *after* the local day utcMs falls
+ * on, expressed back in UTC. Must always move strictly forward.
+ *
+ * The local date is derived from utcMs itself (not utcMs + 1 day) and one
+ * calendar day is added to its date components — not to the raw UTC ms —
+ * before converting back to UTC via the real (DST-aware) local→UTC
+ * conversion. Deriving the next date from utcMs + 86_400_000 and then
+ * reinterpreting that date string as if it were already UTC (as this used
+ * to do) silently drops the timezone offset: for any negative-offset zone
+ * (all of the US) it can resolve back to the *same* local day, so callers
+ * that only stop advancing once the day changes never see progress and
+ * spin forever.
+ */
 function advanceToNextDay(utcMs: number, timezone: string): number {
-  // Jump to next midnight in local timezone by finding the next day boundary
-  const cursor = new Date(utcMs + 86400_000);
-  const dateStr = getLocalDateStr(cursor.getTime(), timezone);
-  // Set to 00:00 local = convert dateStr + "00:00" to UTC
+  const dateStr    = getLocalDateStr(utcMs, timezone);
+  const [y, m, d]  = dateStr.split('-').map(Number);
+  const nextDateStr = new Date(Date.UTC(y, m - 1, d + 1)).toISOString().slice(0, 10);
   try {
-    const naive = new Date(`${dateStr}T00:00:00`);
-    // Approximate: use UTC midnight of local date
-    return new Date(`${dateStr}T00:00:00Z`).getTime();
+    const nextMidnightUtc = new Date(localToUtcIso(nextDateStr, '00:00', timezone)).getTime();
+    // Defensive floor — guarantees forward progress even if conversion
+    // ever returns something unexpected for a given zone/date.
+    return nextMidnightUtc > utcMs ? nextMidnightUtc : utcMs + 86400_000;
   } catch {
     return utcMs + 86400_000;
   }
