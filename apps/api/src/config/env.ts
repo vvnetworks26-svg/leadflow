@@ -69,6 +69,10 @@ export const env = {
   MONGODB_URI:            requireInProd('MONGODB_URI',           ''),
   JWT_SECRET:             requireInProd('JWT_SECRET',            'dev-secret-change-in-production'),
   JWT_REFRESH_SECRET:     requireInProd('JWT_REFRESH_SECRET',    'dev-refresh-secret-change-in-production'),
+  // BullMQ (ai/pipeline/) requires Redis — local dev needs a real Redis
+  // instance running at this URL (e.g. `redis-server` or `docker run -p
+  // 6379:6379 redis`); the localhost default only works if one is up.
+  REDIS_URL:              requireInProd('REDIS_URL',             'redis://localhost:6379'),
 
   // Optional with sensible defaults
   JWT_EXPIRES_IN:         optional('JWT_EXPIRES_IN',         '15m'),
@@ -76,8 +80,12 @@ export const env = {
   CORS_ORIGINS:           optional('CORS_ORIGINS',           'http://localhost:3000'),
   LOG_LEVEL:              optional('LOG_LEVEL',              'info'),
 
-  // AI — optional; if absent the AI engine uses rule-based fallbacks
+  // AI — optional; if absent the AI engine uses rule-based fallbacks.
+  // GEMINI_MODEL always has a value (defaulted) so ai/gemini.ts never needs
+  // a hardcoded fallback string — see docs.ai.google.dev/gemini-api/docs/models
+  // for current model IDs; they change every few months.
   GEMINI_API_KEY: optional('GEMINI_API_KEY', ''),
+  GEMINI_MODEL:   optional('GEMINI_MODEL',   'gemini-3.6-flash'),
 
   // Google Calendar OAuth (optional)
   GOOGLE_CLIENT_ID:     optional('GOOGLE_CLIENT_ID',     ''),

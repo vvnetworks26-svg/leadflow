@@ -27,6 +27,7 @@ import type {
   OrchestratorOutput,
   ConversationStage,
   AIAnalyticsEvent,
+  DetectedIntent,
 } from './types';
 import { classifyIntent, hasBookingIntent }            from './intent';
 import { updateMemoryFromMessage }                     from './memory';
@@ -37,8 +38,8 @@ import { buildSystemPrompt, type OrgContext }          from './prompt-builder';
 import { searchKnowledge }                             from './knowledge';
 import { executeTool, selectAutoTools }                from './tools';
 import { checkInput, checkOutput, fallbackResponse }   from './guardrails';
-import { buildSummary }                                from './summarizer';
 import { sendToGemini, isGeminiConfigured }            from './gemini';
+import { enqueueConversationSummary }                  from './pipeline/ConversationSummaryQueue';
 import { makeEvent, persistEvents }                    from './analytics';
 import { detectIndustry }                              from './industry-profiles';
 import { planNextMove }                                from './conversation-planner';
@@ -47,8 +48,15 @@ import { BusinessModel }                               from '../models/Business.
 import { BusinessIdentityService }                     from '../business-identity/BusinessIdentityService';
 import { ResponseEngine }                              from '../response-engine/ResponseEngine';
 import { PromptAssembler }                             from '../prompt-assembly/PromptAssembler';
+import { ConversationOrchestrationService }            from '../conversation-engine/ConversationOrchestrationService';
 import { logger }                                      from '../utils/logger';
 import type { ConversationPlan as LegacyConversationPlan, RichConversationMemory } from './types';
+import type {
+  ConversationPlan as L3ConversationPlan,
+  ConversationObjective,
+  WorkflowState,
+} from '../conversation-engine/types';
+import type { ResolvedIntent } from '../intent-engine/types';
 
 // ─── Org context loader ───────────────────────────────────────────────────────
 
@@ -165,7 +173,10 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     };
   }
 
-  // ── 9a. Conversation planner ──────────────────────────────────────────────
+  // ── 9a. Conversation planner ───────────────────────────────────────────────
+  // Retained only as the source of a ready-to-use fallback question string for
+  // buildFallbackReply() below (used when Gemini is unavailable/fails). Actual
+  // objective/stage progression comes from the Layer 3 engine in 9b2.
   const industryKey = detectIndustry(orgContext.industry, richMemory);
   const plan        = planNextMove({
     memory:    richMemory,
@@ -179,32 +190,46 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // ── 9b. Layer 1: Business Identity (async load, cached) ───────────────────
   const identity = await BusinessIdentityService.load(organizationId);
 
-  // ── 9b2. Adapt legacy plan to Layer 3 shape ───────────────────────────────
-  const l3Plan = adaptToL3Plan(plan, nextStage);
+  // ── 9b2. Layer 2/3: resolve intent, run the real orchestration engine ─────
+  // NOTE: confidenceLevel/urgency/requiresHuman are placeholders here — this
+  // repo's Layer 2 (intent-engine/IntentUnderstandingService) is not wired
+  // into the live path yet, so urgency-based Layer 3 rules (e.g. emergency
+  // escalation) won't fire from real signal until that's connected too.
+  const resolvedIntent = buildResolvedIntent(intent, userMessage, conversationId, turnCount);
+
+  let l3Plan:              L3ConversationPlan | null = null;
+  let updatedObjective:    string | null = input.currentObjective   ?? null;
+  let updatedWorkflowState:string | null = input.workflowState      ?? null;
+  let updatedBlueprintId:  string | null = input.currentBlueprintId ?? null;
+
+  if (identity) {
+    const orchestration = await ConversationOrchestrationService.orchestrate({
+      organizationId,
+      conversationId,
+      identity,
+      intent:             resolvedIntent,
+      memory:             richMemory,
+      progress:           richMemory.progress,
+      history,
+      turnCount,
+      currentObjective:   (input.currentObjective as ConversationObjective | null | undefined) ?? null,
+      workflowState:      (input.workflowState as WorkflowState | null | undefined) ?? null,
+      currentBlueprintId: input.currentBlueprintId ?? null,
+    });
+    l3Plan               = orchestration.plan;
+    updatedObjective     = orchestration.updatedObjective;
+    updatedWorkflowState = orchestration.updatedWorkflowState;
+    updatedBlueprintId   = orchestration.blueprintId;
+  }
 
   // ── 9c. Layer 4: Response Engine → ResponseBlueprint ────────────────────
-  const blueprint = identity
+  const blueprint = identity && l3Plan
     ? ResponseEngine.buildBlueprint({
         plan:            l3Plan,
         identity,
         stage:           nextStage,
         memory:          richMemory,
-        intent:          {
-          id: `${conversationId}-${turnCount}`,
-          category:    mapToIntentCategory(intent.intent),
-          subCategory: '',
-          confidenceLevel: 'high',
-          urgency:     'normal',
-          detectedService: null,
-          entities:    [],
-          candidates:  [],
-          reasoning:   '',
-          blueprintId: null,
-          requiresHuman:       false,
-          requiresClarification:false,
-          rawMessage:  userMessage,
-          timestamp:   new Date(),
-        },
+        intent:          resolvedIntent,
         qualification,
         recommendations,
         workflowState:   nextStage === 'booking' ? 'booking_in_progress'
@@ -218,29 +243,14 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   let system: string;
   let knowledgeBlock: string;
 
-  if (identity && blueprint) {
+  if (identity && blueprint && l3Plan) {
     const rendererPrompt = PromptAssembler.build({
       identity,
       plan:            l3Plan,
       blueprint,
       memory:          richMemory,
       qualification,
-      intent:          {
-        id: `${conversationId}-${turnCount}`,
-        category:    mapToIntentCategory(intent.intent),
-        subCategory: '',
-        confidenceLevel: 'high',
-        urgency:     'normal',
-        detectedService: null,
-        entities:    [],
-        candidates:  [],
-        reasoning:   '',
-        blueprintId: null,
-        requiresHuman:       false,
-        requiresClarification:false,
-        rawMessage:  userMessage,
-        timestamp:   new Date(),
-      },
+      intent:          resolvedIntent,
       knowledgeHits,
       recommendations,
       history,
@@ -320,12 +330,18 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     }));
   }
 
-  // ── 14. Summary (on completion / escalation) ─────────────────────────────
-  let summaryText: string | undefined;
+  // ── 14. Summary (on completion / escalation) — trigger point (a) ─────────
+  // buildSummary()'s stored write (AIConversationSession.memory.summary) has
+  // moved off this synchronous path onto the async pipeline (ai/pipeline/).
+  // Confirmed nothing reads output.summary/updatedMemory.summary
+  // synchronously today — neither widgetChat() nor aiController.chat()'s
+  // response includes it, and aiController's POST /ai/summary recomputes
+  // independently rather than reading the stored value — so it's safe to
+  // stop computing it here at all, not just stop persisting it.
   if (nextStage === 'completed' || nextStage === 'escalated') {
-    const summary = buildSummary(updatedMemory, qualification, recommendations);
-    summaryText = summary.fullSummary;
-    updatedMemory.summary = summaryText;
+    enqueueConversationSummary(conversationId, organizationId).catch(err => {
+      logger.warn({ err, conversationId, organizationId }, '[Orchestrator] Failed to enqueue conversation summary job');
+    });
     analyticsEvents.push(makeEvent('conversation_summarized', organizationId, conversationId, {
       temperature: qualification.temperature, bookingStatus: updatedMemory.bookingStatus,
     }));
@@ -343,70 +359,49 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     reply,
     updatedMemory,
     updatedStage:    nextStage,
+    updatedObjective,
+    updatedWorkflowState,
+    updatedBlueprintId,
     intent,
     qualification,
     recommendations,
     toolsUsed,
     bookingTriggered,
-    summary:         summaryText,
+    // summary is no longer computed synchronously — see step 14 above.
     analyticsEvents,
   };
 }
 
-// ─── Legacy plan → Layer 3 plan adapter ──────────────────────────────────────
-
-import type { ConversationPlan as L3ConversationPlan } from '../conversation-engine/types';
+// ─── Intent bridge: legacy classifier → Layer 2 ResolvedIntent shape ────────
 
 /**
- * Converts the legacy ai/types ConversationPlan (from planNextMove) into the
- * Layer 3 ConversationPlan shape expected by ResponseEngine and PromptAssembler.
+ * Builds a Layer 2-shaped ResolvedIntent from the legacy classifier's
+ * DetectedIntent so the real Layer 3 orchestrator, ResponseEngine, and
+ * PromptAssembler (which all expect ResolvedIntent) can be driven without
+ * the standalone intent-engine being wired into the live path.
  */
-function adaptToL3Plan(
-  legacyPlan: LegacyConversationPlan,
-  stage:      ConversationStage,
-): L3ConversationPlan {
-  const STD_RECOVERY = {
-    onAmbiguity: 'clarify_intent' as const,
-    onRepeat: 'clarify_intent' as const,
-    onContradiction: 'clarify_intent' as const,
-    onTopicChange: 'build_rapport' as const,
-    preserveContext: true,
-  };
-
-  // Map legacy priority to Layer 3 priority
-  const priority = legacyPlan.priority ?? 'medium';
-
-  // Derive a Layer 3 objective from the legacy plan
-  const objective = legacyPlan.fieldTargeted
-    ? (`collect_${legacyPlan.fieldTargeted.replace('Collected', '')}` as any)
-    : stage === 'booking'    ? 'offer_appointment'
-    : stage === 'completed'  ? 'complete_conversation'
-    : stage === 'escalated'  ? 'escalate_to_human'
-    : stage === 'recommendation' ? 'offer_recommendation'
-    : 'build_rapport';
-
-  const workflowState = stage === 'booking'    ? 'booking_in_progress'
-                      : stage === 'completed'  ? 'completed'
-                      : stage === 'escalated'  ? 'escalating'
-                      : 'collecting_info';
-
+function buildResolvedIntent(
+  intent:         DetectedIntent,
+  userMessage:    string,
+  conversationId: string,
+  turnCount:      number,
+): ResolvedIntent {
   return {
-    objective,
-    reason:             legacyPlan.nextGoal || `Pursuing: ${objective}`,
-    requiredField:      legacyPlan.fieldTargeted ?? null,
-    questionType:       'open',
-    priority:           priority as 'critical' | 'high' | 'medium' | 'low',
-    allowedTools:       [],
-    nextState:          workflowState,
-    fallbackState:      'collecting_info',
-    completionCriteria: legacyPlan.fieldTargeted ? [`${legacyPlan.fieldTargeted}`] : [],
-    recoveryStrategy:   STD_RECOVERY,
-    blueprintId:        null,
-    ruleApplied:        null,
-    isTerminal:         stage === 'completed' || stage === 'escalated',
-    // Carry the original question for the humanizer
-    ...(legacyPlan.questionToAsk ? { questionToAsk: legacyPlan.questionToAsk } : {}),
-  } as L3ConversationPlan;
+    id: `${conversationId}-${turnCount}`,
+    category:    mapToIntentCategory(intent.intent),
+    subCategory: '',
+    confidenceLevel: 'high',
+    urgency:     'normal',
+    detectedService: null,
+    entities:    [],
+    candidates:  [],
+    reasoning:   '',
+    blueprintId: null,
+    requiresHuman:        false,
+    requiresClarification:false,
+    rawMessage:  userMessage,
+    timestamp:   new Date(),
+  };
 }
 
 /**
@@ -444,6 +439,9 @@ function buildBlockedOutput(
     reply:           fallbackResponse(reason),
     updatedMemory:   input.memory,
     updatedStage:    input.stage,
+    updatedObjective:     input.currentObjective   ?? null,
+    updatedWorkflowState: input.workflowState      ?? null,
+    updatedBlueprintId:   input.currentBlueprintId ?? null,
     intent:          { intent: 'Unknown', confidence: 0, subIntents: [], rawText: input.userMessage },
     qualification:   qualifyLead(input.memory),
     recommendations: [],

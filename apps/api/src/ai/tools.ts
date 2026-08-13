@@ -90,6 +90,18 @@ async function lookupAvailability(organizationId: string, date?: string): Promis
   }
 }
 
+/**
+ * DEAD CODE (unreachable, confirmed during Milestone 2 investigation):
+ * selectAutoTools() below never returns 'bookAppointment', and Gemini isn't
+ * called with function-calling/tool schemas anywhere in this codebase — so
+ * nothing ever invokes this via executeTool()'s dispatcher. Real booking
+ * happens through the dedicated POST /:token/book endpoint (widgetBook() in
+ * controllers/widgetController.ts), which now enforces its own stage gate +
+ * ToolGuards check directly, independent of this function. Confirm with the
+ * team before deleting — flagging rather than removing since this task
+ * didn't touch selectAutoTools()/executeTool() and isn't the place to
+ * silently drop code that might be an intentional future extension point.
+ */
 async function bookAppointment(
   organizationId: string,
   memory:         ConversationMemory,
@@ -143,6 +155,13 @@ async function bookAppointment(
   }
 }
 
+/**
+ * DEAD CODE (unreachable) — same situation as bookAppointment() above:
+ * selectAutoTools() never returns 'createLead', so executeTool() never
+ * dispatches to this. Real lead creation happens via the dedicated
+ * POST /:token/leads (widgetCreateLead()) and POST /:token/book
+ * (widgetBook()) endpoints. Confirm before deleting.
+ */
 async function createLead(
   organizationId: string,
   memory:         ConversationMemory,

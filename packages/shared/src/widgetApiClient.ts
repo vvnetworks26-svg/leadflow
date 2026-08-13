@@ -79,6 +79,21 @@ export const widgetApiClient = {
   },
 
   /**
+   * POST /api/v1/widget/:token/session
+   * Creates a new widget session. No auth required. Must be called once
+   * per conversation, before the first /chat call — the returned
+   * widgetSessionId is required on every subsequent /chat and /book call
+   * (server-generated; never fabricate one client-side).
+   */
+  async createSession(): Promise<{ widgetSessionId: string; schemaVersion: number; stage: string; turnCount: number }> {
+    const res = await widgetHttp.post<{
+      status: string;
+      data: { widgetSessionId: string; schemaVersion: number; stage: string; turnCount: number };
+    }>(`/${WIDGET_TOKEN}/session`, {});
+    return res.data.data;
+  },
+
+  /**
    * POST /api/v1/widget/:token/leads
    * Create a CRM lead for this organization. No auth required.
    *
@@ -137,11 +152,16 @@ export const widgetApiClient = {
    * Atomic booking workflow — creates conversation, lead, and appointment
    * server-side in a single request. No JWT required.
    *
+   * customerName is only a fallback: the backend prefers the name already
+   * captured in the conversation's session memory, and rejects the booking
+   * outright if neither source has one. There is no `phone` field here —
+   * the backend never accepts a client-supplied phone number at all; it is
+   * sourced exclusively from session memory (see widgetController.ts).
+   *
    * Returns a full BookingConfirmation-compatible payload.
    */
   async book(data: {
-    customerName:        string;
-    phone:               string;
+    customerName?:       string;
     email?:              string;
     address?:            string;
     zipCode?:            string;
@@ -158,7 +178,7 @@ export const widgetApiClient = {
     priority?:           string;
     value?:              number;
     notes?:              string;
-    conversationId?:     string;
+    widgetSessionId:     string;
     messages?:           Array<{ id: string; sender: 'ai' | 'user' | 'agent'; text: string; timestamp: string }>;
   }): Promise<{
     appointmentId:     string;
@@ -197,20 +217,23 @@ export const widgetApiClient = {
   /**
    * POST /api/v1/widget/:token/chat
    * Send a message to the AI agent. No auth required.
-   * Returns the AI reply, updated stage, and a bookingTriggered flag.
+   * Returns the AI reply, updated stage, a bookingTriggered flag, and the
+   * visitor's name if the AI has captured one so far (null otherwise) —
+   * lets the booking sub-flow avoid asking for it twice.
    */
   async chat(data: {
     message:         string;
-    conversationId:  string;
+    widgetSessionId: string;
     currentPage?:    string;
   }): Promise<{
     reply:           string;
     stage:           string;
     bookingTriggered:boolean;
+    visitorName:     string | null;
   }> {
     const res = await widgetHttp.post<{
       status: string;
-      data: { reply: string; stage: string; bookingTriggered: boolean };
+      data: { reply: string; stage: string; bookingTriggered: boolean; visitorName: string | null };
     }>(`/${WIDGET_TOKEN}/chat`, data);
     return res.data.data;
   },

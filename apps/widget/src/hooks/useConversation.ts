@@ -7,7 +7,8 @@
  *
  * Frontend responsibilities:
  *   - Render messages and typing indicator
- *   - Maintain local UI state (messages, conversationId, isTyping, bookingState, error)
+ *   - Maintain local UI state (messages, widgetSessionId, isTyping, bookingState, error)
+ *   - Create a session via POST /api/v1/widget/:token/session once, up front
  *   - Send every user message to POST /api/v1/widget/:token/chat
  *   - When bookingTriggered === true, drive the slot-picker → confirm → book sub-flow
  *   - Call POST /api/v1/widget/:token/book to persist the appointment
@@ -44,7 +45,7 @@ function makeId(): string {
 
 function makeAiMessage(
   text: string,
-  extras?: { slots?: TimeSlot[]; confirmation?: BookingConfirmation }
+  extras?: { slots?: TimeSlot[]; needsName?: boolean; confirmation?: BookingConfirmation }
 ): ChatMessage {
   return { id: makeId(), sender: 'ai', text, timestamp: new Date(), ...extras };
 }
@@ -59,9 +60,10 @@ function delay(ms: number): Promise<void> {
 
 const INITIAL_STATE: ChatState = {
   messages: [],
-  conversationId: null,
+  widgetSessionId: null,
   isTyping: true,   // show typing while we fetch the greeting
   stage: 'greeting',
+  visitorName: null,
   bookingState: { phase: 'idle', availableSlots: [] },
   loading: false,
   error: null,
@@ -82,24 +84,28 @@ export function useConversation() {
   // ── Greeting initialisation ──────────────────────────────────────────────
   /**
    * Called once when the chat window first opens.
-   * Sends a silent "hello" to the backend to get the AI's opening message,
-   * and receives back a conversationId for the rest of the session.
+   * Creates a real server-side session (POST /:token/session) — the
+   * widgetSessionId it returns is required on every subsequent /chat and
+   * /book call. Never generate this ID client-side; the server owns it.
+   * Then sends a silent "hello" to get the AI's opening message.
    */
   const initConversation = useCallback(async () => {
     if (greetingFiredRef.current) return;
     greetingFiredRef.current = true;
 
-    // Derive a stable conversationId for this widget session.
-    const conversationId = makeId();
-
-    setState(s => ({ ...s, conversationId, isTyping: true }));
+    setState(s => ({ ...s, isTyping: true }));
 
     await delay(TYPING_DELAY_MS);
 
     try {
+      const session = await widgetApiClient.createSession();
+      const { widgetSessionId } = session;
+
+      setState(s => ({ ...s, widgetSessionId }));
+
       const response = await widgetApiClient.chat({
         message: '__init__',
-        conversationId,
+        widgetSessionId,
         currentPage: typeof window !== 'undefined' ? window.location.pathname : undefined,
       });
 
@@ -107,10 +113,12 @@ export function useConversation() {
         ...s,
         isTyping: false,
         stage: response.stage as ConversationStage,
+        visitorName: response.visitorName ?? s.visitorName,
         messages: [makeAiMessage(response.reply)],
       }));
     } catch {
-      // Fallback greeting if the backend is unreachable
+      // Fallback greeting if the backend is unreachable (session creation
+      // or the init chat call both land here)
       setState(s => ({
         ...s,
         isTyping: false,
@@ -132,7 +140,7 @@ export function useConversation() {
    *   server-side via POST /widget/book.
    */
   const sendMessage = useCallback(async (text: string) => {
-    const { isTyping, loading, stage, bookingState, conversationId } = state;
+    const { isTyping, loading, stage, bookingState, widgetSessionId } = state;
 
     if (isTyping || loading || stage === 'completed') return;
     if (!text.trim()) return;
@@ -150,12 +158,24 @@ export function useConversation() {
       return;
     }
 
+    if (bookingState.phase === 'collectName') {
+      await handleNameCollection(text, userMsg);
+      return;
+    }
+
     // ── Normal AI conversation ────────────────────────────────────────────
-    const cid = conversationId ?? makeId();
+    // widgetSessionId must already exist by the time a user can type —
+    // initConversation() creates it before the chat window is interactive.
+    // No client-side fallback ID is generated here; if it's somehow
+    // missing, surface the error below rather than silently minting one
+    // the server has never seen.
+    if (!widgetSessionId) {
+      setState(s => ({ ...s, error: 'Session not ready yet — please try again in a moment.' }));
+      return;
+    }
 
     setState(s => ({
       ...s,
-      conversationId: cid,
       messages: [...s.messages, userMsg],
       isTyping: true,
       error: null,
@@ -166,7 +186,7 @@ export function useConversation() {
     try {
       const response = await widgetApiClient.chat({
         message: text.trim(),
-        conversationId: cid,
+        widgetSessionId,
         currentPage: typeof window !== 'undefined' ? window.location.pathname : undefined,
       });
 
@@ -179,6 +199,7 @@ export function useConversation() {
           ...s,
           isTyping: false,
           stage: nextStage,
+          visitorName: response.visitorName ?? s.visitorName,
           messages: [...s.messages, makeAiMessage(response.reply)],
           bookingState: { ...s.bookingState, phase: 'loadingSlots' },
         }));
@@ -191,6 +212,7 @@ export function useConversation() {
         ...s,
         isTyping: false,
         stage: nextStage,
+        visitorName: response.visitorName ?? s.visitorName,
         messages: [...s.messages, makeAiMessage(response.reply)],
       }));
     } catch (err) {
@@ -307,6 +329,7 @@ export function useConversation() {
   async function handleSlotConfirmation(text: string, userMsg: ChatMessage) {
     const lower = text.trim().toLowerCase();
     const { selectedSlot, availableSlots } = state.bookingState;
+    const visitorName = state.visitorName;
 
     // ── User wants a different time ──────────────────────────────────────
     if (lower.startsWith('n') || lower.includes('no') || lower.includes('other')) {
@@ -346,9 +369,73 @@ export function useConversation() {
     // ── Confirmed — persist the booking ──────────────────────────────────
     if (!selectedSlot) return;
 
+    setState(s => ({ ...s, messages: [...s.messages, userMsg] }));
+
+    if (!visitorName) {
+      // The AI never captured a name for this session. Happens on the
+      // emergency-triage paths (hvac.emergency, plumbing.emergency), which
+      // only require a phone number before booking becomes available — see
+      // conversation-engine/blueprints/default-blueprints.ts. Ask for it
+      // via the collectName sub-flow instead of persisting a placeholder;
+      // the backend rejects a booking with no name at all (MISSING_CONTACT_INFO).
+      setState(s => ({
+        ...s,
+        isTyping: true,
+        bookingState: { ...s.bookingState, phase: 'collectName' },
+      }));
+
+      await delay(TYPING_DELAY_MS);
+
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        messages: [...s.messages, makeAiMessage("Before I confirm — what's your name?", { needsName: true })],
+      }));
+      return;
+    }
+
+    await finalizeBooking(selectedSlot, visitorName);
+  }
+
+  /**
+   * Handle the visitor submitting their name via the collectName sub-flow —
+   * only reached when handleSlotConfirmation found no name already known
+   * (see above). The typed text (or the inline ContactForm's submission,
+   * which also routes through onSend/sendMessage) is taken directly as the
+   * name; it is not sent to the AI as a chat turn.
+   */
+  async function handleNameCollection(text: string, userMsg: ChatMessage) {
+    const name = text.trim();
+    const { selectedSlot } = state.bookingState;
+
+    if (!name) {
+      setState(s => ({
+        ...s,
+        messages: [...s.messages, userMsg, makeAiMessage("I'll need your name to confirm the booking.", { needsName: true })],
+      }));
+      return;
+    }
+
+    if (!selectedSlot) {
+      // Unreachable in practice — collectName is only entered from a state
+      // that already has a selectedSlot (see handleSlotConfirmation) — but
+      // don't persist a booking with no slot if it somehow happens.
+      setState(s => ({ ...s, bookingState: { phase: 'idle', availableSlots: [] } }));
+      return;
+    }
+
+    setState(s => ({ ...s, messages: [...s.messages, userMsg], visitorName: name }));
+    await finalizeBooking(selectedSlot, name);
+  }
+
+  /**
+   * Shared tail of the booking sub-flow — persists the booking and renders
+   * the resulting success/failure message. Used both when the AI already
+   * had the visitor's name and after the collectName fallback supplies it.
+   */
+  async function finalizeBooking(slot: TimeSlot, customerName: string) {
     setState(s => ({
       ...s,
-      messages: [...s.messages, userMsg],
       isTyping: true,
       loading: true,
       bookingState: { ...s.bookingState, phase: 'booking' },
@@ -356,7 +443,7 @@ export function useConversation() {
 
     await delay(TYPING_DELAY_MS);
 
-    const confirmation = await persistBooking(state.conversationId, state.messages, selectedSlot);
+    const confirmation = await persistBooking(state.widgetSessionId, state.messages, slot, customerName);
 
     if (confirmation) {
       const doneMsg = makeAiMessage(
@@ -408,12 +495,30 @@ export function useConversation() {
  * Serialises the current chat messages so the server can store them on the
  * conversation record. All business logic (lead creation, appointment creation,
  * automation) is handled server-side.
+ *
+ * widgetSessionId is required by the backend (see WidgetBookSchema) — the
+ * booking is rejected if it's missing or doesn't reference a real session.
+ *
+ * customerName is sent only as a fallback for the case where the AI never
+ * captured one (the collectName sub-flow — see handleSlotConfirmation /
+ * handleNameCollection above). The backend's session memory is the
+ * authoritative source and is preferred there whenever it has a name.
+ * Phone is never sent from here at all — the backend sources it from
+ * session memory exclusively (guaranteed present by the stage gate before
+ * booking is ever reachable). See WidgetBookSchema / widgetBook() in
+ * widgetController.ts.
  */
 async function persistBooking(
-  conversationId: string | null,
+  widgetSessionId: string | null,
   messages: ChatMessage[],
   slot: TimeSlot,
+  customerName: string,
 ): Promise<BookingConfirmation | null> {
+  if (!widgetSessionId) {
+    console.error('[useConversation] persistBooking called with no widgetSessionId');
+    return null;
+  }
+
   try {
     const serialisedMessages = messages.map(m => ({
       id:        m.id,
@@ -423,11 +528,7 @@ async function persistBooking(
     }));
 
     const booking = await widgetApiClient.book({
-      // The backend will extract name/service/phone from the conversation
-      // session it already has. We pass safe fallbacks here; the authoritative
-      // data lives in the AIConversationSession on the server.
-      customerName:  'Widget Customer',
-      phone:         '0000000000',
+      customerName,
       service:       'HVAC Service',
       emergency:     false,
       date:          slot.date,
@@ -435,7 +536,7 @@ async function persistBooking(
       displayDate:   slot.displayDate,
       displayTime:   slot.displayTime,
       duration:      60,
-      conversationId: conversationId ?? undefined,
+      widgetSessionId,
       messages:      serialisedMessages,
     });
 

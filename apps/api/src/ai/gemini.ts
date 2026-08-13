@@ -31,6 +31,14 @@ function getClient(): GoogleGenerativeAI {
   return _client;
 }
 
+/**
+ * Override the Gemini client (for testing). Pass null to reset to the
+ * default lazily-constructed singleton on next use.
+ */
+export function setGeminiClient(client: GoogleGenerativeAI | null): void {
+  _client = client;
+}
+
 // ─── Safety settings ──────────────────────────────────────────────────────────
 
 const SAFETY_SETTINGS = [
@@ -47,7 +55,7 @@ export interface GeminiRequest {
   knowledgeBlock: string;   // injected as first user message
   history:        ChatMessage[];
   userMessage:    string;
-  modelName?:     string;   // defaults to gemini-1.5-flash
+  modelName?:     string;   // defaults to env.GEMINI_MODEL
   maxTokens?:     number;
 }
 
@@ -66,7 +74,7 @@ export async function sendToGemini(req: GeminiRequest): Promise<GeminiResponse> 
   try {
     const client = getClient();
     const model  = client.getGenerativeModel({
-      model:          req.modelName ?? 'gemini-1.5-flash',
+      model:          req.modelName ?? env.GEMINI_MODEL,
       safetySettings: SAFETY_SETTINGS,
       generationConfig: {
         maxOutputTokens: req.maxTokens ?? 512,
@@ -119,4 +127,63 @@ export async function sendToGemini(req: GeminiRequest): Promise<GeminiResponse> 
  */
 export function isGeminiConfigured(): boolean {
   return Boolean(env.GEMINI_API_KEY);
+}
+
+/**
+ * Startup health check — makes one lightweight real call to the configured
+ * Gemini model so a dead/renamed model string (env.GEMINI_MODEL) is caught
+ * at deploy time instead of discovered turn-by-turn via the silent
+ * rule-based fallback in runOrchestrator().
+ *
+ * No-op when Gemini isn't configured at all (GEMINI_API_KEY absent) — that's
+ * intentional fallback-only mode, not a failure.
+ *
+ * Throws on failure — mirrors connectDatabase()'s throw-and-let-the-caller-
+ * decide pattern. See handleGeminiHealthFailure() below for what the caller
+ * (server.ts) does with that failure.
+ */
+export async function checkGeminiHealth(): Promise<void> {
+  if (!isGeminiConfigured()) return;
+
+  const client = getClient();
+  const model  = client.getGenerativeModel({ model: env.GEMINI_MODEL });
+
+  try {
+    await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: 'ping' }] }],
+      generationConfig: { maxOutputTokens: 5 },
+    });
+    logger.info({ model: env.GEMINI_MODEL }, '[Gemini] Startup health check passed');
+  } catch (err: any) {
+    throw new Error(
+      `[Gemini] Startup health check failed for model "${env.GEMINI_MODEL}": ${err?.message ?? 'Unknown error'}`,
+    );
+  }
+}
+
+/**
+ * Decides what a checkGeminiHealth() failure means for the boot process.
+ * Extracted from server.ts as a pure function so the environment-aware
+ * branch is directly unit-testable without booting the real app (server.ts
+ * calls start() as an import-time side effect).
+ *
+ * Reuses env.isProd — the same NODE_ENV flag requireInProd() already keys
+ * off in config/env.ts — rather than a second environment-detection
+ * mechanism. Deliberately the OPPOSITE polarity from requireInProd() (which
+ * is strict only in production): production stays resilient/non-fatal, and
+ * every non-production environment (development, test — the bucket
+ * staging/CI runs in today, since this codebase has no dedicated "staging"
+ * NODE_ENV value) fails the boot outright. Always logs at error level
+ * first, in both branches, so the failure is visible either way.
+ *
+ * @throws the original error when isProd is false — the caller must let
+ *         this propagate so the process exits (see server.ts's start().catch()).
+ */
+export function handleGeminiHealthFailure(err: unknown, isProd: boolean): void {
+  if (isProd) {
+    logger.error({ err, model: env.GEMINI_MODEL }, 'Server starting — Gemini health check failed, conversations will use the rule-based fallback until this is fixed');
+    return;
+  }
+  logger.error({ err, model: env.GEMINI_MODEL, nodeEnv: env.NODE_ENV }, 'Gemini health check failed — refusing to start outside production');
+  throw err;
 }

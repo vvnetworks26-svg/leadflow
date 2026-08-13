@@ -73,9 +73,11 @@ export const AuthService = {
     });
     await user.save();
 
-    // Create the organization (this also seeds default data)
+    // Create the organization (this also seeds default data, including the
+    // Business document with the real phone — so Layer 3 orchestration is
+    // live from this org's very first conversation, not degraded).
     const orgName = dto.organizationName ?? `${dto.firstName} ${dto.lastName}'s Organization`;
-    const org     = await OrganizationService.create(orgName);
+    const org     = await OrganizationService.create(orgName, dto.phone);
     const orgId   = org.id as string;
 
     // Assign the user as owner of the new organization
