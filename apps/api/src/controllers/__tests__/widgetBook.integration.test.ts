@@ -8,7 +8,13 @@
  *     default-blueprints.ts's allowedTools data) rejects premature bookings
  *   - ToolGuards (Layer 7) — specifically guardBookAppointment's duplicate
  *     prevention — is actually wired in and still behaves as before
- * Both rejection paths must leave zero Lead/Appointment/Conversation state.
+ *   - customerName/phone are sourced from session.memory, never trusted
+ *     verbatim from the client — a client-supplied customerName is only
+ *     ever a fallback for the (rare, emergency-triage) case where the AI
+ *     never captured one, and phone is never accepted from the client at
+ *     all. A booking with no real contact info anywhere is rejected
+ *     (MISSING_CONTACT_INFO), never persisted with placeholder data.
+ * All rejection paths must leave zero Lead/Appointment/Conversation state.
  */
 
 import { describe, it, before, after } from 'node:test';
@@ -72,8 +78,6 @@ describe('POST /api/v1/widget/:token/book — enforcement', () => {
 
   function bookingPayload(overrides: Record<string, unknown> = {}) {
     return {
-      customerName: 'Jamie Rivera',
-      phone:        '555-030-1111',
       email:        'jamie@example.com',
       service:      'AC Repair',
       date:         '2026-09-01',
@@ -87,6 +91,33 @@ describe('POST /api/v1/widget/:token/book — enforcement', () => {
       leads:        await LeadModel.countDocuments({ organizationId: orgId }),
       appointments: await AppointmentModel.countDocuments({ organizationId: orgId }),
     };
+  }
+
+  /**
+   * Advances a fresh session to a stage whose blueprint allows booking (same
+   * data ConversationOrchestrationService would have produced from a real
+   * conversation reaching this objective), and seeds session.memory —
+   * widgetBook() now sources customerName/phone from there, not the request
+   * body, so tests that bypass the real chat turns (as this suite does) must
+   * seed it explicitly to simulate what a real conversation would have
+   * already captured.
+   */
+  async function advanceToBookableStage(
+    orgId: string,
+    widgetSessionId: string,
+    memory: { visitorName?: string | null; phone?: string | null } = {},
+  ) {
+    const set: Record<string, unknown> = {
+      currentObjective: 'offer_appointment',
+      workflowState:    'booking_in_progress',
+    };
+    if ('visitorName' in memory) set['memory.visitorName'] = memory.visitorName;
+    if ('phone'       in memory) set['memory.phone']       = memory.phone;
+
+    await AIConversationSessionModel.findOneAndUpdate(
+      { widgetSessionId, organizationId: orgId },
+      { $set: set },
+    );
   }
 
   it('rejects a booking with no session reference — no records created', async () => {
@@ -124,31 +155,33 @@ describe('POST /api/v1/widget/:token/book — enforcement', () => {
     assert.equal(counts.appointments, 0);
   });
 
-  it('succeeds for a session in a qualifying stage (book_appointment in that stage\'s allowedTools)', async () => {
+  it('succeeds for a session in a qualifying stage, persisting the real name/phone from session memory — not a client-supplied value', async () => {
     const slug = 'book-qualifying-stage';
     const { orgId, widgetSessionId } = await seedOrgAndSession(slug);
 
-    // Advance the session to a stage whose blueprint allows booking — same
-    // data ConversationOrchestrationService would have produced from a real
-    // conversation reaching this objective.
-    await AIConversationSessionModel.findOneAndUpdate(
-      { widgetSessionId, organizationId: orgId },
-      { $set: { currentObjective: 'offer_appointment', workflowState: 'booking_in_progress' } },
-    );
+    // Real data the AI would have captured earlier in the conversation.
+    await advanceToBookableStage(orgId, widgetSessionId, { visitorName: 'Jamie Rivera', phone: '555-030-1111' });
 
+    // Client sends a different name — memory must win, proving the server
+    // never trusts a client-supplied identity for a real booking.
     const { status, body } = await postJson(
       `/api/v1/widget/${slug}/book`,
-      bookingPayload({ widgetSessionId }),
+      bookingPayload({ widgetSessionId, customerName: 'Someone Else' }),
     );
 
     assert.equal(status, 201);
     assert.equal(body.status, 'ok');
     assert.ok(body.data.appointmentId);
     assert.ok(body.data.confirmationNumber);
+    assert.equal(body.data.customerName, 'Jamie Rivera', 'session memory must win over a client-supplied customerName');
 
     const counts = await countRecords(orgId);
     assert.equal(counts.leads, 1);
     assert.equal(counts.appointments, 1);
+
+    const lead = await LeadModel.findOne({ organizationId: orgId }).lean();
+    assert.equal(lead!.name,  'Jamie Rivera');
+    assert.equal(lead!.phone, '555-030-1111');
 
     // memory.bookingStatus should now be 'booked' — required for the
     // duplicate-prevention guard to have anything to check on a next attempt.
@@ -156,14 +189,75 @@ describe('POST /api/v1/widget/:token/book — enforcement', () => {
     assert.equal((session!.memory as any).bookingStatus, 'booked');
   });
 
+  it('accepts a client-supplied customerName only as a fallback when session memory has no name (emergency-triage path — phone still comes from memory)', async () => {
+    const slug = 'book-name-fallback';
+    const { orgId, widgetSessionId } = await seedOrgAndSession(slug);
+
+    // Phone collected (guaranteed by the stage gate), but no name — matches
+    // the emergency-triage blueprints, which gate booking on phone alone.
+    await advanceToBookableStage(orgId, widgetSessionId, { visitorName: null, phone: '555-030-1111' });
+
+    const { status, body } = await postJson(
+      `/api/v1/widget/${slug}/book`,
+      bookingPayload({ widgetSessionId, customerName: 'Alex Chen' }),
+    );
+
+    assert.equal(status, 201);
+    assert.equal(body.data.customerName, 'Alex Chen');
+
+    const lead = await LeadModel.findOne({ organizationId: orgId }).lean();
+    assert.equal(lead!.name,  'Alex Chen');
+    assert.equal(lead!.phone, '555-030-1111', 'phone still comes from memory, never the client');
+  });
+
+  it('rejects a booking with neither session memory nor a client-supplied name available — no placeholder persisted, no records created', async () => {
+    const slug = 'book-no-contact-info';
+    const { orgId, widgetSessionId } = await seedOrgAndSession(slug);
+
+    // Session reached a qualifying stage but memory never actually captured
+    // a name or phone (unreachable via a real conversation — the stage gate
+    // guarantees phoneCollected — but this suite advances stages directly,
+    // so it can simulate the invariant being violated).
+    await advanceToBookableStage(orgId, widgetSessionId, { visitorName: null, phone: null });
+
+    const { status, body } = await postJson(
+      `/api/v1/widget/${slug}/book`,
+      bookingPayload({ widgetSessionId }),
+    );
+
+    assert.equal(status, 422);
+    assert.equal(body.code, 'MISSING_CONTACT_INFO');
+    assert.match(body.message, /name and phone/i);
+
+    const counts = await countRecords(orgId);
+    assert.equal(counts.leads, 0);
+    assert.equal(counts.appointments, 0);
+  });
+
+  it('rejects a booking when memory has a name but genuinely no phone anywhere — no placeholder persisted', async () => {
+    const slug = 'book-no-phone';
+    const { orgId, widgetSessionId } = await seedOrgAndSession(slug);
+
+    await advanceToBookableStage(orgId, widgetSessionId, { visitorName: 'Jamie Rivera', phone: null });
+
+    const { status, body } = await postJson(
+      `/api/v1/widget/${slug}/book`,
+      bookingPayload({ widgetSessionId }),
+    );
+
+    assert.equal(status, 422);
+    assert.equal(body.code, 'MISSING_CONTACT_INFO');
+
+    const counts = await countRecords(orgId);
+    assert.equal(counts.leads, 0);
+    assert.equal(counts.appointments, 0);
+  });
+
   it('blocks a duplicate booking on the same session via guardBookAppointment (regression: guard behavior unchanged)', async () => {
     const slug = 'book-duplicate';
     const { orgId, widgetSessionId } = await seedOrgAndSession(slug);
 
-    await AIConversationSessionModel.findOneAndUpdate(
-      { widgetSessionId, organizationId: orgId },
-      { $set: { currentObjective: 'offer_appointment', workflowState: 'booking_in_progress' } },
-    );
+    await advanceToBookableStage(orgId, widgetSessionId, { visitorName: 'Jamie Rivera', phone: '555-030-1111' });
 
     const first = await postJson(`/api/v1/widget/${slug}/book`, bookingPayload({ widgetSessionId }));
     assert.equal(first.status, 201);

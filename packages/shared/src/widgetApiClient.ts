@@ -152,11 +152,16 @@ export const widgetApiClient = {
    * Atomic booking workflow — creates conversation, lead, and appointment
    * server-side in a single request. No JWT required.
    *
+   * customerName is only a fallback: the backend prefers the name already
+   * captured in the conversation's session memory, and rejects the booking
+   * outright if neither source has one. There is no `phone` field here —
+   * the backend never accepts a client-supplied phone number at all; it is
+   * sourced exclusively from session memory (see widgetController.ts).
+   *
    * Returns a full BookingConfirmation-compatible payload.
    */
   async book(data: {
-    customerName:        string;
-    phone:               string;
+    customerName?:       string;
     email?:              string;
     address?:            string;
     zipCode?:            string;
@@ -212,7 +217,9 @@ export const widgetApiClient = {
   /**
    * POST /api/v1/widget/:token/chat
    * Send a message to the AI agent. No auth required.
-   * Returns the AI reply, updated stage, and a bookingTriggered flag.
+   * Returns the AI reply, updated stage, a bookingTriggered flag, and the
+   * visitor's name if the AI has captured one so far (null otherwise) —
+   * lets the booking sub-flow avoid asking for it twice.
    */
   async chat(data: {
     message:         string;
@@ -222,10 +229,11 @@ export const widgetApiClient = {
     reply:           string;
     stage:           string;
     bookingTriggered:boolean;
+    visitorName:     string | null;
   }> {
     const res = await widgetHttp.post<{
       status: string;
-      data: { reply: string; stage: string; bookingTriggered: boolean };
+      data: { reply: string; stage: string; bookingTriggered: boolean; visitorName: string | null };
     }>(`/${WIDGET_TOKEN}/chat`, data);
     return res.data.data;
   },

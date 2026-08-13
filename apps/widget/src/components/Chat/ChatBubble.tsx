@@ -4,6 +4,7 @@ import { Bot } from 'lucide-react';
 import { ChatMessage } from '../../types';
 import { SlotPicker } from './SlotPicker';
 import { BookingConfirmationCard } from './BookingConfirmationCard';
+import { ContactForm } from './ContactForm';
 
 interface Props {
   message: ChatMessage;
@@ -12,6 +13,7 @@ interface Props {
   /** Last message in a consecutive run from the same sender */
   isLastInGroup?: boolean;
   onSlotSelect?: (index: number) => void;
+  onNameSubmit?: (name: string) => void;
 }
 
 function formatTime(date: Date): string {
@@ -32,7 +34,7 @@ function renderText(text: string): React.ReactNode {
   });
 }
 
-export function ChatBubble({ message, isFirstInGroup = true, isLastInGroup = true, onSlotSelect }: Props) {
+export function ChatBubble({ message, isFirstInGroup = true, isLastInGroup = true, onSlotSelect, onNameSubmit }: Props) {
   const isAi = message.sender === 'ai';
 
   return (
@@ -82,6 +84,11 @@ export function ChatBubble({ message, isFirstInGroup = true, isLastInGroup = tru
         {/* Slot picker */}
         {message.slots && message.slots.length > 0 && onSlotSelect && (
           <SlotPicker slots={message.slots} onSelect={onSlotSelect} />
+        )}
+
+        {/* Name collection — only when the AI reached booking without one */}
+        {message.needsName && onNameSubmit && (
+          <ContactForm onSubmit={onNameSubmit} />
         )}
 
         {/* Booking confirmation */}
