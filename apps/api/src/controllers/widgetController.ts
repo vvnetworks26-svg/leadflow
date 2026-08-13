@@ -13,10 +13,14 @@
 import { Request, Response, NextFunction } from 'express';
 import { randomBytes, randomUUID } from 'crypto';
 import { OrganizationModel }   from '../models/Organization.model';
+import { AppointmentModel }    from '../models/Appointment.model';
 import { LeadService }         from '../services/LeadService';
 import { ConversationService } from '../services/ConversationService';
 import { AppointmentService }  from '../services/AppointmentService';
 import { ApiError }            from '../middleware/errorHandler';
+import { AvailabilityService, BookingRulesService, CalendarProviderRegistry } from '../booking-engine';
+import { localToUtcIso }       from '../booking-engine/TimezoneService';
+import type { BlockedSlot, AvailabilityRequest } from '../booking-engine/types';
 import { CreateLeadSchema }    from '../dto/lead.dto';
 import { CreateConversationSchema } from '../dto/conversation.dto';
 import { runOrchestrator }     from '../ai/orchestrator';
@@ -286,6 +290,93 @@ export async function getWidgetConfig(req: Request, res: Response, next: NextFun
         timezone:       org.timezone,
       },
     });
+  } catch (e) { next(e); }
+}
+
+const WidgetAvailabilityQuerySchema = z.object({
+  duration:     z.coerce.number().int().min(15).max(480).optional().default(60),
+  // Accepted for forward-compatibility with the widget's request shape, but not
+  // currently used to filter slots — no natural-language date parser exists
+  // server-side yet. The full window (today .. maximumBookingDays) is returned.
+  preferredDay: z.string().optional(),
+});
+
+/**
+ * GET /api/v1/widget/:token/availability
+ * Returns open appointment slots for an organization, reusing the same
+ * booking-engine (Layer 8) slot generation that the authenticated dashboard
+ * booking flow and the conversation orchestrator both rely on.
+ *
+ * No JWT required — the organization is identified by the widget token.
+ * Existing (non-cancelled) appointments in the window are loaded and passed
+ * in as blocked slots so already-booked times are excluded.
+ */
+export async function widgetGetAvailability(req: Request, res: Response, next: NextFunction) {
+  try {
+    const result = WidgetAvailabilityQuerySchema.safeParse(req.query);
+    if (!result.success) {
+      const msg = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+      throw new ApiError(422, msg, 'VALIDATION_ERROR');
+    }
+    const { duration } = result.data;
+
+    const orgId    = await resolveOrg(req.params.token);
+    const identity = await BusinessIdentityService.load(orgId);
+    if (!identity) throw new ApiError(404, 'Business identity not found', 'ORG_IDENTITY_NOT_FOUND');
+
+    const nowMs      = Date.now();
+    const timezone   = identity.contactInfo.timezone;
+    const startDate  = new Date(nowMs).toISOString().slice(0, 10);
+    const windowDays = identity.bookingRules.maximumBookingDays ?? 14;
+    const endDate    = new Date(nowMs + windowDays * 86_400_000).toISOString().slice(0, 10);
+
+    // Existing appointments in the window become blocked slots so the
+    // generator doesn't offer times that are already taken.
+    const existing = await AppointmentModel.find({
+      organizationId: orgId,
+      status:         { $ne: 'Canceled' },
+      date:           { $gte: startDate, $lte: endDate },
+    }).lean();
+
+    const blockedSlots: BlockedSlot[] = existing.map(a => {
+      const startUtc = localToUtcIso(a.date, a.time, timezone);
+      const endUtc   = new Date(new Date(startUtc).getTime() + (a.duration ?? 60) * 60_000).toISOString();
+      return { startUtc, endUtc, reason: 'booked' };
+    });
+
+    // Mirrors BookingEngine.getAvailability's internals, but calls
+    // AvailabilityService directly so the widget's requested `duration` can
+    // override the catalog/default lookup (GetAvailabilityOptions only
+    // supports duration via service-name matching, not a raw override).
+    const effectiveRules = BookingRulesService.forRequest(identity, '', false);
+    const availabilityReq: AvailabilityRequest = {
+      organizationId:  identity.organizationId,
+      businessHours:   identity.businessHours,
+      bookingRules:    BookingRulesService.toBookingRulesShape(effectiveRules),
+      timezone,
+      durationMinutes: duration,
+      blockedSlots,
+      startDateUtc:    startDate,
+      endDateUtc:      endDate,
+      nowMs,
+    };
+    const availability = await AvailabilityService.getSlots(availabilityReq, CalendarProviderRegistry.default());
+
+    // Map the booking-engine's AppointmentSlot shape to the widget's TimeSlot
+    // shape — the same date/time/displayDate/displayTime fields WidgetBookSchema
+    // (POST /:token/book) accepts, so a selected slot can be posted straight through.
+    const slots = availability.slots.map(s => {
+      const [displayDate, displayTime] = s.displayLabel.split(' at ');
+      return {
+        date:        s.startLocal.slice(0, 10),
+        time:        s.startLocal.slice(11, 16),
+        displayDate: displayDate ?? s.displayLabel,
+        displayTime: displayTime ?? '',
+        available:   s.available,
+      };
+    });
+
+    res.json({ status: 'ok', data: slots });
   } catch (e) { next(e); }
 }
 

@@ -8,7 +8,7 @@
 
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
-import { getWidgetConfig, widgetCreateLead, widgetCreateConversation, widgetChat, widgetBook, widgetCreateSession, widgetGetSession, widgetDeleteSession } from '../controllers/widgetController';
+import { getWidgetConfig, widgetCreateLead, widgetCreateConversation, widgetChat, widgetBook, widgetCreateSession, widgetGetSession, widgetDeleteSession, widgetGetAvailability } from '../controllers/widgetController';
 
 const router = Router();
 
@@ -61,6 +61,16 @@ const sessionDeleteLimiter = rateLimit({
   message: RATE_LIMITED_MESSAGE,
 });
 
+/** GET /:token/availability — read-only slot lookups, polled while the picker is open */
+const availabilityLimiter = rateLimit({
+  windowMs: 15 * 60_000,
+  max: 60,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: ipPlusToken,
+  message: RATE_LIMITED_MESSAGE,
+});
+
 /** POST /:token/chat — normal conversation turns */
 const chatLimiter = rateLimit({
   windowMs: 15 * 60_000,
@@ -99,6 +109,7 @@ router.get('/:token/session/:widgetSessionId',      sessionReadLimiter,   widget
 router.delete('/:token/session/:widgetSessionId',   sessionDeleteLimiter, widgetDeleteSession);
 router.post('/:token/leads',                        defaultLimiter,       widgetCreateLead);
 router.post('/:token/conversations',                defaultLimiter,       widgetCreateConversation);
+router.get('/:token/availability',                  availabilityLimiter,  widgetGetAvailability);
 router.post('/:token/chat',                         chatLimiter,          widgetChat);
 router.post('/:token/book',                         bookLimiter,          widgetBook);
 
