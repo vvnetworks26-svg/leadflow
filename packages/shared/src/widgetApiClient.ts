@@ -79,6 +79,21 @@ export const widgetApiClient = {
   },
 
   /**
+   * POST /api/v1/widget/:token/session
+   * Creates a new widget session. No auth required. Must be called once
+   * per conversation, before the first /chat call — the returned
+   * widgetSessionId is required on every subsequent /chat and /book call
+   * (server-generated; never fabricate one client-side).
+   */
+  async createSession(): Promise<{ widgetSessionId: string; schemaVersion: number; stage: string; turnCount: number }> {
+    const res = await widgetHttp.post<{
+      status: string;
+      data: { widgetSessionId: string; schemaVersion: number; stage: string; turnCount: number };
+    }>(`/${WIDGET_TOKEN}/session`, {});
+    return res.data.data;
+  },
+
+  /**
    * POST /api/v1/widget/:token/leads
    * Create a CRM lead for this organization. No auth required.
    *
@@ -158,7 +173,7 @@ export const widgetApiClient = {
     priority?:           string;
     value?:              number;
     notes?:              string;
-    conversationId?:     string;
+    widgetSessionId:     string;
     messages?:           Array<{ id: string; sender: 'ai' | 'user' | 'agent'; text: string; timestamp: string }>;
   }): Promise<{
     appointmentId:     string;
@@ -201,7 +216,7 @@ export const widgetApiClient = {
    */
   async chat(data: {
     message:         string;
-    conversationId:  string;
+    widgetSessionId: string;
     currentPage?:    string;
   }): Promise<{
     reply:           string;

@@ -179,8 +179,9 @@ export interface BookingState {
 export interface ChatState {
   /** Messages to display in the chat window */
   messages: ChatMessage[];
-  /** Backend-assigned conversation session ID */
-  conversationId: string | null;
+  /** Backend-assigned session ID from POST /:token/session — required on
+   *  every subsequent /chat and /book call; never generated client-side. */
+  widgetSessionId: string | null;
   /** Whether the AI is generating a reply */
   isTyping: boolean;
   /** Last known stage returned by the orchestrator */
