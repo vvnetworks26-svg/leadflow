@@ -36,11 +36,12 @@ async function uniqueSlug(base: string): Promise<string> {
 
 // ─── Default seed data ────────────────────────────────────────────────────────
 
-async function seedDefaults(organizationId: string, companyName: string): Promise<void> {
+async function seedDefaults(organizationId: string, companyName: string, phone: string): Promise<void> {
   // Seed default Business/settings document
   await BusinessModel.create({
     organizationId,
     companyName,
+    phone,
     businessHours: {
       monday:    { isOpen: true,  openTime: '08:00', closeTime: '17:00' },
       tuesday:   { isOpen: true,  openTime: '08:00', closeTime: '17:00' },
@@ -87,13 +88,21 @@ export const OrganizationService = {
   /**
    * Create a new organization and seed default configuration.
    * Called during user registration (onboarding flow).
+   *
+   * seedDefaults() (the Business document — required for BusinessIdentity /
+   * Layer 3 to work at all) is awaited and its failure propagates, unlike
+   * the best-effort seeds below. It used to be fire-and-forget, which meant
+   * a seeding failure left a fully-created, silently-broken Organization
+   * with no Business document and no error anywhere. Now a failure here
+   * fails create() itself, so it's visible (500, logged) instead of a
+   * phantom 201.
    */
-  async create(name: string): Promise<IOrganization> {
+  async create(name: string, phone: string): Promise<IOrganization> {
     const slug = await uniqueSlug(buildSlug(name));
     const org  = await OrganizationModel.create({ name, slug });
 
-    // Fire-and-forget seed — don't fail org creation if seeding errors
-    seedDefaults(org.id as string, name).catch(() => {/* non-blocking */});
+    await seedDefaults(org.id as string, name, phone);
+
     // Seed default pipeline
     PipelineService.seedDefault(org.id as string).catch(() => {});
     // Seed default meeting types

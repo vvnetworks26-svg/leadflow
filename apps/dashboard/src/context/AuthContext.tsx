@@ -25,7 +25,7 @@ interface AuthContextType {
   isLoaded: boolean;
   user: AuthUser | null;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, firstName: string, lastName: string, password: string) => Promise<void>;
+  signup: (email: string, firstName: string, lastName: string, password: string, phone: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -200,11 +200,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     email: string,
     firstName: string,
     lastName: string,
-    password: string
+    password: string,
+    phone: string
   ): Promise<void> => {
     const res = await apiClient.post<{
       data: { user: any; tokens: { accessToken: string; refreshToken: string } }
-    }>('/auth/register', { email, firstName, lastName, password, role: 'owner' });
+    }>('/auth/register', { email, firstName, lastName, password, phone, role: 'owner' });
 
     const { user: backendUser, tokens } = res.data.data;
     const mappedUser = mapUser(backendUser);
