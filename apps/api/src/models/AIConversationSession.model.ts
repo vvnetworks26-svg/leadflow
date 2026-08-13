@@ -58,6 +58,12 @@ export interface IAIConversationSession {
   status:           SessionStatus;     // session lifecycle state
   schemaVersion:    number;            // incremented when memory/progress shape changes
   progress:         IConversationProgress; // typed sub-document; replaces Schema.Types.Mixed
+
+  // v2.2 additions — Layer 3 orchestration engine state (all nullable; absent
+  // on pre-v2.2 docs, which is handled the same as "no state yet").
+  currentObjective?:   string | null;  // conversation-engine ConversationObjective
+  workflowState?:      string | null;  // conversation-engine WorkflowState
+  currentBlueprintId?: string | null;
 }
 
 export interface AIConversationSessionDocument extends Omit<IAIConversationSession, 'createdAt'>, Document {}
@@ -131,6 +137,13 @@ const AIConversationSessionSchema = new Schema<AIConversationSessionDocument>(
     // All existing code that read progress as Mixed continues to work; the values
     // are now individually typed and queryable via dot-notation.
     progress: { type: ProgressSchema, default: () => ({}) },
+
+    // ── v2.2 additions ───────────────────────────────────────────────────────
+    // Layer 3 orchestration engine state, carried forward turn-to-turn so
+    // blueprint/objective progression persists. All nullable and additive.
+    currentObjective:   { type: String, default: null },
+    workflowState:      { type: String, default: null },
+    currentBlueprintId: { type: String, default: null },
   },
   {
     timestamps: { createdAt: true, updatedAt: false },

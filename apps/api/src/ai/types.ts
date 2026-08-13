@@ -374,6 +374,14 @@ export interface OrchestratorInput {
   industry?:      string;
   progress?:      ConversationProgress;
   plan?:          ConversationPlan;
+  // v3 additions — Layer 3 orchestration state, persisted per-session by the
+  // caller and threaded back in so blueprint/objective progression survives
+  // across turns. Typed as plain strings here (rather than importing the
+  // conversation-engine enums) to avoid a cross-layer type dependency; the
+  // orchestrator casts to the real enum types when calling Layer 3.
+  currentObjective?:   string | null;
+  workflowState?:      string | null;
+  currentBlueprintId?: string | null;
 }
 
 export interface OrchestratorOutput {
@@ -387,4 +395,8 @@ export interface OrchestratorOutput {
   bookingTriggered:boolean;
   summary?:        string;
   analyticsEvents: AIAnalyticsEvent[];
+  // v3 additions — Layer 3 orchestration state to persist for the next turn.
+  updatedObjective:     string | null;
+  updatedWorkflowState: string | null;
+  updatedBlueprintId:   string | null;
 }
