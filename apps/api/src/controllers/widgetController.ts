@@ -36,7 +36,7 @@ import { BusinessIdentityService } from '../business-identity/BusinessIdentitySe
 import { enqueueConversationSummary } from '../ai/pipeline/ConversationSummaryQueue';
 import { logger }              from '../utils/logger';
 import { z }                   from 'zod';
-import type { ConversationStage } from '../ai/types';
+import type { ConversationStage, ConversationMemory } from '../ai/types';
 import type { AppointmentType }   from '../types';
 import type { ConversationObjective, WorkflowState } from '../conversation-engine/types';
 import type { ToolCall, ToolSelectionContext } from '../tool-orchestration/types';
@@ -564,13 +564,17 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
       currentBlueprintId: output.updatedBlueprintId,
     });
 
-    // Response schema is unchanged (REQ-14.2).
+    // Response schema is additive-only over REQ-14.2's shape: visitorName is
+    // a new field, nothing existing changed. Lets the frontend know whether
+    // the AI has already captured a name so the booking sub-flow doesn't
+    // ask twice — see widgetBook() below, which is the actual source of truth.
     res.json({
       status: 'ok',
       data: {
         reply:            output.reply,
         stage:            output.updatedStage,
         bookingTriggered: output.bookingTriggered,
+        visitorName:      output.updatedMemory.visitorName ?? null,
       },
     });
   } catch (e) { next(e); }
@@ -579,9 +583,17 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
 // ─── Booking input schema ─────────────────────────────────────────────────────
 
 const WidgetBookSchema = z.object({
-  // Visitor identity
-  customerName:  z.string().min(1).trim(),
-  phone:         z.string().min(7).trim(),
+  // Visitor identity — NOT trusted as-is. Phone is never accepted from the
+  // client at all: the stage gate below guarantees session.memory.phone is
+  // already populated by the time booking is reachable (every blueprint
+  // that exposes book_appointment requires phoneCollected first — see
+  // conversation-engine/blueprints/default-blueprints.ts). customerName is
+  // accepted here only as the fallback the widget's collectName sub-flow
+  // sends when the AI never asked for a name (the emergency-triage paths
+  // gate on phone only) — see widgetBook() below for how these are resolved
+  // against session.memory. Trusting a client-supplied phone unconditionally
+  // is exactly how placeholder/fake contact data got persisted before this.
+  customerName:  z.string().min(1).trim().optional(),
   email:         z.string().email().optional(),
   address:       z.string().optional().default('Not provided'),
   zipCode:       z.string().optional(),
@@ -736,6 +748,32 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
       );
     }
 
+    // ── Resolve authoritative contact info ─────────────────────────────────────
+    // session.memory, not the request body, is the source of truth for phone —
+    // the stage gate above already guarantees phoneCollected was reached
+    // before any blueprint exposes book_appointment (see default-blueprints.ts),
+    // so it is always populated here in a real conversation. visitorName is
+    // guaranteed too for most blueprints, but the emergency-triage paths
+    // (hvac.emergency, plumbing.emergency) gate booking on phone alone — so
+    // d.customerName (only ever sent by the widget's collectName fallback UI,
+    // shown when the AI never asked) is accepted as a fallback for name only.
+    // If neither source has both, this is not a fake-data situation to paper
+    // over with a placeholder — it's rejected outright.
+    const memory       = (session.memory as ConversationMemory | undefined) ?? emptyMemory();
+    const customerName = (memory.visitorName ?? d.customerName ?? '').trim();
+    const phone         = (memory.phone         ?? '').trim();
+
+    // phone.length < 7 mirrors CreateLeadSchema's own min(7) — belt-and-
+    // suspenders so a malformed memory.phone value 422s cleanly here rather
+    // than throwing an uncaught ZodError (→ 500) further down in step 2.
+    if (!customerName || !phone || phone.length < 7) {
+      throw new ApiError(
+        422,
+        "This conversation hasn't collected the visitor's name and phone number yet — booking can't be completed without them.",
+        'MISSING_CONTACT_INFO',
+      );
+    }
+
     // ── ToolGuards (Layer 7) ───────────────────────────────────────────────────
     // guardBookAppointment (the only guard relevant to 'book_appointment')
     // reads call.params (guestName/guestEmail/guestPhone) and
@@ -750,7 +788,7 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
     const identity    = await BusinessIdentityService.load(orgId);
     const toolCall: ToolCall = {
       tool:       'book_appointment',
-      params:     { guestName: d.customerName, guestEmail: d.email, guestPhone: d.phone },
+      params:     { guestName: customerName, guestEmail: d.email, guestPhone: phone },
       reason:     'Booking request from widget',
       priority:   'critical',
       required:   true,
@@ -791,8 +829,8 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
 
     // ── 2. Create lead ───────────────────────────────────────────────────────
     const leadDto = CreateLeadSchema.parse({
-      name:                d.customerName,
-      phone:               d.phone,
+      name:                customerName,
+      phone:               phone,
       email:               d.email ?? '',
       address:             d.address,
       zipCode:             d.zipCode,
@@ -815,8 +853,8 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
     // ── 4. Create appointment ────────────────────────────────────────────────
     const appointment = await AppointmentService.create(orgId, {
       leadId:             lead.id,
-      leadName:           d.customerName,
-      leadPhone:          d.phone,
+      leadName:           customerName,
+      leadPhone:          phone,
       customerEmail:      d.email,
       address:            d.address,
       zipCode:            d.zipCode,
@@ -872,7 +910,7 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
         confirmationNumber,
         conversationId:    convId,
         leadId:            lead.id,
-        customerName:      d.customerName,
+        customerName:      customerName,
         service:           d.service,
         date:              d.date,
         time:              d.time,

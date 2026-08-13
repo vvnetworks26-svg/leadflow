@@ -47,6 +47,7 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
   }, [messages.length]);
 
   const handleSlotSelect = (index: number) => onSend(String(index));
+  const handleNameSubmit = (name: string) => onSend(name);
 
   const inputDisabled =
     isTyping ||
@@ -54,10 +55,12 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
     isCompleted ||
     bookingState.phase === 'selectSlot' ||
     bookingState.phase === 'loadingSlots' ||
-    bookingState.phase === 'booking';
+    bookingState.phase === 'booking' ||
+    bookingState.phase === 'collectName';
 
   const inputPlaceholder =
     bookingState.phase === 'selectSlot'   ? 'Select a time slot above…'
+    : bookingState.phase === 'collectName' ? 'Enter your name above…'
     : bookingState.phase === 'loadingSlots' || bookingState.phase === 'booking'
                                             ? 'Please wait…'
     : isCompleted                           ? 'Conversation complete'
@@ -164,6 +167,7 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
                   isFirstInGroup={idx === 0 || messages[idx - 1]?.sender !== msg.sender}
                   isLastInGroup={idx === messages.length - 1 || messages[idx + 1]?.sender !== msg.sender}
                   onSlotSelect={handleSlotSelect}
+                  onNameSubmit={handleNameSubmit}
                 />
               </React.Fragment>
             ))}

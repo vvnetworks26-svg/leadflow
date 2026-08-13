@@ -151,6 +151,7 @@ export type BookingPhase =
   | 'loadingSlots' // fetching available time slots
   | 'selectSlot'   // slot picker is visible
   | 'confirmSlot'  // user chose a slot, awaiting confirmation
+  | 'collectName'  // AI never captured the visitor's name — asking before booking
   | 'booking'      // POST /widget/book in flight
   | 'booked';      // booking confirmed
 
@@ -161,6 +162,8 @@ export interface ChatMessage {
   timestamp: Date;
   /** Populated on AI messages that present slot options */
   slots?: TimeSlot[];
+  /** Populated on the AI message that asks the visitor for their name */
+  needsName?: boolean;
   /** Populated on the final AI message after a successful booking */
   confirmation?: BookingConfirmation;
 }
@@ -186,6 +189,10 @@ export interface ChatState {
   isTyping: boolean;
   /** Last known stage returned by the orchestrator */
   stage: ConversationStage;
+  /** The visitor's name, once the AI (or the collectName fallback form) has
+   *  captured it — server-authoritative, mirrors the backend's chat response.
+   *  Never a placeholder: null means genuinely not known yet. */
+  visitorName: string | null;
   /** Booking sub-flow state (client-side only, after bookingTriggered) */
   bookingState: BookingState;
   /** Non-null while a network request is in flight */
