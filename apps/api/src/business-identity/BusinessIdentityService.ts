@@ -12,6 +12,7 @@
  *   if (!identity) { use safe defaults }
  */
 
+import { ZodError }                         from 'zod';
 import { businessIdentityCache }            from './cache/BusinessIdentityCache';
 import { MongoBusinessIdentityRepository }  from './repository/MongoBusinessIdentityRepository';
 import type { BusinessIdentity }            from './types';
@@ -60,7 +61,19 @@ export const BusinessIdentityService = {
       businessIdentityCache.set(organizationId, identity);
       return identity;
     } catch (err) {
-      logger.error({ err, organizationId }, '[BusinessIdentityService] Failed to load identity');
+      // Losing BusinessIdentity silently disables the entire Layer 3
+      // orchestration engine for this org (runOrchestrator falls back to the
+      // legacy planner). This must stay loud — error level, with the specific
+      // validation failure broken out as a queryable field, not just buried
+      // inside a serialized error object.
+      const validationIssues = err instanceof ZodError
+        ? err.issues.map(i => ({ path: i.path.join('.'), message: i.message }))
+        : undefined;
+
+      logger.error(
+        { err, organizationId, validationIssues },
+        '[BusinessIdentityService] Failed to load identity — Layer 3 orchestration is DISABLED for this organization until this is fixed',
+      );
       return null;
     }
   },

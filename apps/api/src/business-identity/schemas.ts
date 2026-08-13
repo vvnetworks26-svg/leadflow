@@ -77,8 +77,16 @@ export const CompanyProfileSchema = z.object({
   tagline:      z.string().max(200).default(''),
 });
 
+/**
+ * Single source of truth for the phone format BusinessIdentity requires.
+ * Exported so write paths (e.g. dto/business.dto.ts) can reject a bad
+ * phone number before it ever reaches this schema and silently disables
+ * Layer 3 for the org at read time — see BusinessIdentityService.load().
+ */
+export const PhoneSchema = z.string().min(7).max(20);
+
 export const ContactInfoSchema = z.object({
-  phone:    z.string().min(7).max(20),
+  phone:    PhoneSchema,
   email:    z.string().email().or(z.literal('')).default(''),
   address:  z.string().max(200).default(''),
   city:     z.string().max(100).default(''),

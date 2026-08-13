@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { BusinessService } from '../services/BusinessService';
 import { ApiError } from '../middleware/errorHandler';
+import { UpsertBusinessSchema } from '../dto/business.dto';
 
 export async function get(req: Request, res: Response, next: NextFunction) {
   try {
@@ -12,7 +13,13 @@ export async function get(req: Request, res: Response, next: NextFunction) {
 
 export async function upsert(req: Request, res: Response, next: NextFunction) {
   try {
-    const settings = await BusinessService.upsert(req.organizationId!, req.body);
+    const result = UpsertBusinessSchema.safeParse(req.body);
+    if (!result.success) {
+      const msg = result.error.errors.map(e => `${e.path.join('.')}: ${e.message}`).join(', ');
+      throw new ApiError(422, msg, 'VALIDATION_ERROR');
+    }
+
+    const settings = await BusinessService.upsert(req.organizationId!, result.data);
     res.json({ status: 'ok', data: settings });
   } catch (e) { next(e); }
 }
