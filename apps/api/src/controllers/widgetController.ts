@@ -22,11 +22,22 @@ import { CreateConversationSchema } from '../dto/conversation.dto';
 import { runOrchestrator }     from '../ai/orchestrator';
 import { AIConversationSessionModel } from '../models/AIConversationSession.model';
 import { emptyMemory }         from '../ai/types';
+import { memoryToRich }        from '../ai/memory';
+import { qualifyLead }         from '../ai/qualification';
 import { makeEvent, persistEvents } from '../ai/analytics';
 import { AutomationService }   from '../crm/automation/AutomationService';
+import { ConversationOrchestrationService } from '../conversation-engine/ConversationOrchestrationService';
+import { ToolGuards }          from '../tool-orchestration/ToolGuards';
+import { BusinessIdentityService } from '../business-identity/BusinessIdentityService';
+import { enqueueConversationSummary } from '../ai/pipeline/ConversationSummaryQueue';
+import { logger }              from '../utils/logger';
 import { z }                   from 'zod';
 import type { ConversationStage } from '../ai/types';
 import type { AppointmentType }   from '../types';
+import type { ConversationObjective, WorkflowState } from '../conversation-engine/types';
+import type { ToolCall, ToolSelectionContext } from '../tool-orchestration/types';
+import type { ResolvedIntent } from '../intent-engine/types';
+import type { BusinessIdentity } from '../business-identity/types';
 
 /** Resolve organizationId from a widget token (org slug or org ID). */
 async function resolveOrg(token: string): Promise<string> {
@@ -72,6 +83,8 @@ export async function widgetCreateSession(req: Request, res: Response, next: Nex
       seq:           0,
       schemaVersion: 1,
       stage:         'greeting' as ConversationStage,
+      memory:        emptyMemory(),
+      history:       [],
       turnCount:     0,
       lastActivity:  new Date(),
     });
@@ -239,6 +252,14 @@ export async function widgetDeleteSession(req: Request, res: Response, next: Nex
         message: 'Session not found',
       });
     }
+
+    // Trigger point (b) for the async conversation-summary pipeline — the
+    // widget closing is a real "conversation ended" signal. jobId dedup
+    // (keyed by conversationId) collapses this with trigger (a) if the
+    // orchestrator already enqueued one for this session.
+    enqueueConversationSummary(updated.conversationId, organizationId).catch(err => {
+      logger.warn({ err, conversationId: updated.conversationId, organizationId }, '[widgetDeleteSession] Failed to enqueue conversation summary job');
+    });
 
     // Successfully archived — return 200 { status: 'ok' } (REQ-4.1)
     return res.status(200).json({ status: 'ok' });
@@ -420,6 +441,9 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
       memory:         session.memory as any ?? emptyMemory(),
       stage:          (session.stage as ConversationStage) ?? 'greeting',
       currentPage,
+      currentObjective:   session.currentObjective   ?? null,
+      workflowState:      session.workflowState      ?? null,
+      currentBlueprintId: session.currentBlueprintId ?? null,
     });
 
     // ── History append ─────────────────────────────────────────────────────────
@@ -438,12 +462,15 @@ export async function widgetChat(req: Request, res: Response, next: NextFunction
     ].slice(-MAX_WIDGET_HISTORY);
 
     await AIConversationSessionModel.findByIdAndUpdate(session._id, {
-      stage:         output.updatedStage,
-      memory:        output.updatedMemory,
-      history:       newHistory,
-      qualification: output.qualification,
-      turnCount:     session.turnCount + 1,
-      lastActivity:  new Date(),
+      stage:              output.updatedStage,
+      memory:             output.updatedMemory,
+      history:            newHistory,
+      qualification:      output.qualification,
+      turnCount:          session.turnCount + 1,
+      lastActivity:       new Date(),
+      currentObjective:   output.updatedObjective,
+      workflowState:      output.updatedWorkflowState,
+      currentBlueprintId: output.updatedBlueprintId,
     });
 
     // Response schema is unchanged (REQ-14.2).
@@ -488,8 +515,11 @@ const WidgetBookSchema = z.object({
   value:               z.number().min(0).optional().default(0),
   notes:               z.string().optional(),
 
-  // Pre-existing conversation id (widget may have already created it)
-  conversationId: z.string().optional(),
+  // A booking must reference a real, existing session — the client-supplied
+  // conversationId field this used to accept is gone; the conversationId used
+  // internally always comes from the looked-up session document instead
+  // (never trusted from the client — same principle as widgetChat()).
+  widgetSessionId: z.string().regex(UUID_V4_RE, 'widgetSessionId must be a valid UUID v4'),
 
   // Chat messages to store on the conversation
   messages: z.array(z.object({
@@ -499,6 +529,33 @@ const WidgetBookSchema = z.object({
     timestamp: z.string(),
   })).optional().default([]),
 });
+
+// ─── ToolGuards context placeholder ────────────────────────────────────────────
+
+/**
+ * A booking-form submission has no "current message" to classify — there's
+ * no real ResolvedIntent for this action. guardBookAppointment (the only
+ * guard wired into widgetBook()) does not read ctx.intent at all, so this
+ * exists purely to satisfy ToolSelectionContext's type structurally. If a
+ * future guard change starts reading ctx.intent, replace this with real
+ * classification instead of extending the placeholder.
+ */
+const NO_CURRENT_MESSAGE_INTENT: ResolvedIntent = {
+  id: 'widget-book-no-message',
+  category: 'book_appointment',
+  subCategory: '',
+  confidenceLevel: 'unknown',
+  urgency: 'normal',
+  detectedService: null,
+  entities: [],
+  candidates: [],
+  reasoning: 'No message — booking form submission, not a chat turn.',
+  blueprintId: null,
+  requiresHuman: false,
+  requiresClarification: false,
+  rawMessage: '',
+  timestamp: new Date(),
+};
 
 // ─── Appointment type inference ───────────────────────────────────────────────
 
@@ -518,14 +575,23 @@ function inferType(service: string, emergency: boolean): AppointmentType {
  * Complete, atomic booking workflow for the anonymous chat widget.
  * No JWT required — the organization is identified by the widget token.
  *
+ * Requires a real, existing session (widgetSessionId) and enforces:
+ *   - Stage gate (Layer 3): the session's current blueprint stage must list
+ *     book_appointment in allowedTools — see default-blueprints.ts.
+ *   - ToolGuards (Layer 7): guardBookAppointment — blocks duplicate bookings
+ *     on an already-booked session.
+ * Both checks run, and can reject, before any Lead/Appointment/Conversation
+ * write happens.
+ *
  * Performs in a single request:
  *   1. Resolve organization from token
- *   2. Create (or reuse) conversation record
- *   3. Create lead and link conversation
- *   4. Create appointment and link lead + conversation
- *   5. Update lead with appointmentId
- *   6. Fire booking automation
- *   7. Return full booking confirmation
+ *   2. Look up the session; run the stage gate + ToolGuards check
+ *   3. Update the session's conversation with the final messages
+ *   4. Create lead and link conversation
+ *   5. Create appointment and link lead + conversation
+ *   6. Update lead with appointmentId; mark session memory as booked
+ *   7. Fire booking automation
+ *   8. Return full booking confirmation
  *
  * This is the only public endpoint that creates appointments.
  * The authenticated /api/v1/appointments endpoint is unchanged.
@@ -541,29 +607,95 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
     const d     = result.data;
     const orgId = await resolveOrg(req.params.token);
 
-    // ── 1. Create or reuse conversation ─────────────────────────────────────
-    let convId = d.conversationId ?? '';
+    // ── Session lookup (required) ─────────────────────────────────────────────
+    // A booking must reference a real, existing session. widgetSessionId is
+    // only ever used to look the session up — the conversationId used below
+    // always comes from the resolved session document, never the client
+    // (same server-authoritative principle as widgetChat()).
+    const session = await AIConversationSessionModel
+      .findOne({ widgetSessionId: d.widgetSessionId, organizationId: orgId })
+      .lean();
+    if (!session) throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
 
-    if (!convId) {
-      const conv = await ConversationService.create(orgId, {
-        leadName:      d.customerName,
-        leadPhone:     d.phone,
-        leadEmail:     d.email,
-        hvacNeed:      d.service,
+    // ── Stage gate (Layer 3) ───────────────────────────────────────────────────
+    // Reuses the exact blueprint-loading + plan-building logic the live
+    // orchestrator runs every turn (ConversationOrchestrationService) — no
+    // separate "which stages allow booking" list is maintained here. Stages
+    // that list book_appointment in allowedTools are defined once, in
+    // conversation-engine/blueprints/default-blueprints.ts.
+    const blueprint = await ConversationOrchestrationService.loadBlueprint(
+      session.currentBlueprintId ?? null,
+      '', // industry — fallback only, used when currentBlueprintId is absent;
+      '', // intentCategory — same. A session with no blueprint yet safely
+          // resolves to blueprint=null below, which correctly rejects booking
+          // (the 'build_rapport' fallback objective has no allowed tools).
+    );
+    const stagePlan = ConversationOrchestrationService.buildConversationPlan({
+      objective:     (session.currentObjective as ConversationObjective | null) ?? 'build_rapport',
+      workflowState: (session.workflowState    as WorkflowState        | null) ?? 'initialising',
+      blueprint,
+      ruleApplied:   null,
+      reason:        'widgetBook stage-gate check',
+    });
+    if (!stagePlan.allowedTools.includes('book_appointment')) {
+      throw new ApiError(
+        409,
+        "This conversation hasn't reached a stage where booking is available yet.",
+        'BOOKING_STAGE_NOT_REACHED',
+      );
+    }
+
+    // ── ToolGuards (Layer 7) ───────────────────────────────────────────────────
+    // guardBookAppointment (the only guard relevant to 'book_appointment')
+    // reads call.params (guestName/guestEmail/guestPhone) and
+    // ctx.memory.bookingStatus (blocks a duplicate booking on an
+    // already-booked session) — verified by reading ToolGuards.ts directly.
+    // The remaining ToolSelectionContext fields (intent, userMessage) are
+    // structurally required by the type but not read by this guard; they're
+    // real session/org data wherever available, and honestly-labelled
+    // placeholders only where no such data exists for a booking-form
+    // submission (there is no "current message" being processed here).
+    const richMemory = memoryToRich(session.memory as any);
+    const identity    = await BusinessIdentityService.load(orgId);
+    const toolCall: ToolCall = {
+      tool:       'book_appointment',
+      params:     { guestName: d.customerName, guestEmail: d.email, guestPhone: d.phone },
+      reason:     'Booking request from widget',
+      priority:   'critical',
+      required:   true,
+      idempotent: false,
+    };
+    const guardCtx: ToolSelectionContext = {
+      organizationId: orgId,
+      conversationId: session.conversationId,
+      memory:         richMemory,
+      stage:          (session.stage as ConversationStage) ?? 'greeting',
+      workflowState:  (session.workflowState    as WorkflowState)        ?? 'initialising',
+      objective:      (session.currentObjective as ConversationObjective) ?? 'build_rapport',
+      qualification:  session.qualification ?? qualifyLead(richMemory),
+      turnCount:      session.turnCount,
+      // Not read by guardBookAppointment — see comment above. If a future
+      // guard starts reading these, populate them honestly instead of
+      // extending the placeholder.
+      intent:      NO_CURRENT_MESSAGE_INTENT,
+      userMessage: '',
+      identity:    identity ?? ({} as BusinessIdentity),
+    };
+    const guardResult = ToolGuards.check(toolCall, guardCtx);
+    if (!guardResult.allowed) {
+      throw new ApiError(409, guardResult.reason ?? 'Booking blocked', 'BOOKING_BLOCKED');
+    }
+
+    // ── 1. Reuse the session's conversation ───────────────────────────────────
+    // The session (and therefore its conversation) is now guaranteed to exist —
+    // there is no "create a new conversation" branch anymore.
+    const convId = session.conversationId;
+    if (d.messages.length > 0) {
+      await ConversationService.update(orgId, convId, {
         status:        'completed',
         lastMessageAt: new Date().toISOString(),
-        messages:      d.messages,
-      });
-      convId = conv.id as string;
-    } else {
-      // Conversation was pre-created by the widget; update its messages if provided
-      if (d.messages.length > 0) {
-        await ConversationService.update(orgId, convId, {
-          status:        'completed',
-          lastMessageAt: new Date().toISOString(),
-          messages:      d.messages as any,
-        }).catch(() => { /* best-effort */ });
-      }
+        messages:      d.messages as any,
+      }).catch(() => { /* best-effort */ });
     }
 
     // ── 2. Create lead ───────────────────────────────────────────────────────
@@ -611,6 +743,28 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
 
     // ── 5. Back-link appointment on lead ─────────────────────────────────────
     await LeadService.update(orgId, lead.id, { appointmentId: appointment.id }).catch(() => {});
+
+    // ── 5b. Mark the session's memory as booked ───────────────────────────────
+    // Required for guardBookAppointment's duplicate-prevention check (above)
+    // to ever actually fire on a later attempt against this same session —
+    // memory.bookingStatus was previously never set to 'booked' anywhere in
+    // the live path. This is the ConversationMemory.bookingStatus field
+    // (already read throughout ai/ and response-engine/), NOT the separate,
+    // under-wired AIConversationSession.status ('active'|'archived'|'booked')
+    // lifecycle enum — that field is untouched by this change.
+    await AIConversationSessionModel.findByIdAndUpdate(session._id, {
+      $set: { 'memory.bookingStatus': 'booked' },
+    });
+
+    // Trigger point (c) for the async conversation-summary pipeline — a
+    // successful booking is a real "conversation ended" signal, functionally
+    // independent of the legacy stage machine reaching 'completed' (this
+    // endpoint bypasses runOrchestrator()/computeNextStage() entirely).
+    // jobId dedup (keyed by conversationId) collapses this with trigger (a)
+    // if a later chat turn also transitions stage to 'completed'.
+    enqueueConversationSummary(convId, orgId).catch(err => {
+      logger.warn({ err, conversationId: convId, organizationId: orgId }, '[widgetBook] Failed to enqueue conversation summary job');
+    });
 
     // ── 6. Fire booking automation (fire-and-forget) ──────────────────────────
     AutomationService.fire('booking_made', orgId, lead.id, {
