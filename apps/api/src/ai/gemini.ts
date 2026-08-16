@@ -48,6 +48,35 @@ const SAFETY_SETTINGS = [
   { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_MEDIUM_AND_ABOVE },
 ];
 
+// ─── Thinking configuration ───────────────────────────────────────────────────
+
+/**
+ * Turns Gemini 3.x's reasoning pass off for this call.
+ *
+ * Why this exists: `maxOutputTokens` is a SHARED budget — thinking tokens and
+ * answer tokens both draw from it. Left at its default, gemini-3.6-flash spent
+ * 440–575 of our 600-token budget on thinking and had ~20 left for the actual
+ * reply, so replies routinely came back cut off mid-sentence ("What specific
+ * HVAC service are you") or empty. Measured directly: default runs report
+ * thoughtsTokenCount 443–573; with this config it is 0.
+ *
+ * Shape notes (verified against the live API, not assumed):
+ *   - `thinkingConfig.thinkingLevel` is the accepted form. A FLAT
+ *     `thinking_level` / `thinkingLevel` on generationConfig — which parts of
+ *     Google's docs show — is rejected with 400 "Cannot find field".
+ *   - `minimal` is the floor for 3.x; there is no "off" value, but it yields
+ *     thoughtsTokenCount 0 in practice. The 2.5-era `thinkingBudget: 0` does
+ *     not apply to 3.x.
+ *   - `minimal` is NOT this model's default, despite doc claims to the
+ *     contrary — the default measurably thinks.
+ *
+ * Cast: @google/generative-ai@0.21.0 predates thinking models so its
+ * GenerationConfig type has no `thinkingConfig`, but the SDK never whitelists
+ * fields — it JSON.stringify()s the request wholesale — so the key reaches the
+ * REST API intact. The cast is a types-only workaround, not a behavioural one.
+ */
+const THINKING_OFF = { thinkingConfig: { thinkingLevel: 'minimal' } } as unknown as Record<string, unknown>;
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export interface GeminiRequest {
@@ -81,6 +110,7 @@ export async function sendToGemini(req: GeminiRequest): Promise<GeminiResponse> 
         temperature:     0.7,
         topP:            0.9,
         topK:            40,
+        ...THINKING_OFF,
       },
     });
 
