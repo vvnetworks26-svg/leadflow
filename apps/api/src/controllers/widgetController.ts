@@ -295,21 +295,29 @@ export async function getWidgetConfig(req: Request, res: Response, next: NextFun
 
 const WidgetAvailabilityQuerySchema = z.object({
   duration:     z.coerce.number().int().min(15).max(480).optional().default(60),
-  // Accepted for forward-compatibility with the widget's request shape, but not
-  // currently used to filter slots — no natural-language date parser exists
-  // server-side yet. The full window (today .. maximumBookingDays) is returned.
+  // Accepted for forward-compatibility with the widget's request shape, but
+  // not currently used to filter slots — no natural-language date parser
+  // exists server-side yet. The full window (today .. maximumBookingDays)
+  // is always returned.
   preferredDay: z.string().optional(),
 });
 
 /**
  * GET /api/v1/widget/:token/availability
+ *
  * Returns open appointment slots for an organization, reusing the same
- * booking-engine (Layer 8) slot generation that the authenticated dashboard
- * booking flow and the conversation orchestrator both rely on.
+ * booking-engine (Layer 8) slot generation the authenticated dashboard
+ * booking flow and the conversation orchestrator both rely on — no
+ * separate availability logic is maintained here.
  *
  * No JWT required — the organization is identified by the widget token.
- * Existing (non-cancelled) appointments in the window are loaded and passed
+ * Existing (non-canceled) appointments in the window are loaded and passed
  * in as blocked slots so already-booked times are excluded.
+ *
+ * A org with no Business document (BusinessIdentityService.load() returns
+ * null — see business-identity/BusinessIdentityService.ts) gets a clean
+ * 404 with an explicit code, same pattern as getWidgetConfig() above —
+ * never a crash from reading businessHours/bookingRules off a null identity.
  */
 export async function widgetGetAvailability(req: Request, res: Response, next: NextFunction) {
   try {
@@ -346,8 +354,10 @@ export async function widgetGetAvailability(req: Request, res: Response, next: N
 
     // Mirrors BookingEngine.getAvailability's internals, but calls
     // AvailabilityService directly so the widget's requested `duration` can
-    // override the catalog/default lookup (GetAvailabilityOptions only
-    // supports duration via service-name matching, not a raw override).
+    // override the catalog/default lookup — GetAvailabilityOptions only
+    // supports duration via service-name matching (AvailabilityRequest's
+    // own durationMinutes field is explicitly documented as an "override
+    // catalog duration" escape hatch for exactly this).
     const effectiveRules = BookingRulesService.forRequest(identity, '', false);
     const availabilityReq: AvailabilityRequest = {
       organizationId:  identity.organizationId,
@@ -362,10 +372,19 @@ export async function widgetGetAvailability(req: Request, res: Response, next: N
     };
     const availability = await AvailabilityService.getSlots(availabilityReq, CalendarProviderRegistry.default());
 
+    // The generator computes every open slot across the org's full
+    // maximumBookingDays window (90 by default) — correct for the
+    // engine's own purpose, but a chat SlotPicker is a numbered list of
+    // buttons, not a calendar: dumping hundreds of slots into one chat
+    // bubble is unusable. Cap to the nearest MAX_WIDGET_SLOTS, soonest
+    // first — the AI's own framing ("Here are our next available times")
+    // already sets the expectation of a short list, not an exhaustive one.
+    const MAX_WIDGET_SLOTS = 10;
+
     // Map the booking-engine's AppointmentSlot shape to the widget's TimeSlot
     // shape — the same date/time/displayDate/displayTime fields WidgetBookSchema
     // (POST /:token/book) accepts, so a selected slot can be posted straight through.
-    const slots = availability.slots.map(s => {
+    const slots = availability.slots.slice(0, MAX_WIDGET_SLOTS).map(s => {
       const [displayDate, displayTime] = s.displayLabel.split(' at ');
       return {
         date:        s.startLocal.slice(0, 10),
