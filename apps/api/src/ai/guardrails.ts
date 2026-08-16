@@ -117,6 +117,13 @@ export function checkOutput(aiReply: string): GuardrailResult & { sanitized: str
   // Check for legal/medical advice claims
   const hasAdviceClaim = /this is (not|legal|medical|financial) advice|consult (a |your )?(doctor|lawyer|attorney|accountant)/i.test(sanitized);
 
+  // Defence-in-depth: incomplete/truncated reply detection.
+  // Deliberately a detector, not a rewriter — a reply cut off mid-sentence is
+  // a symptom of an upstream generation problem (output-token budget), and
+  // silently patching the text here would hide that. Flagging it surfaces a
+  // guardrail_blocked analytics event while leaving the text untouched.
+  const isTruncated = looksTruncated(sanitized);
+
   if (hasSuspiciousPrice) {
     sanitized = sanitized.replace(
       /\$[\d,]+(?:\.\d{2})?\s*(?:per|\/)\s*(?:month|year|user|seat)/gi,
@@ -126,10 +133,34 @@ export function checkOutput(aiReply: string): GuardrailResult & { sanitized: str
 
   return {
     passed:    true,
-    safe:      !hasSuspiciousPrice && !hasAdviceClaim,
+    safe:      !hasSuspiciousPrice && !hasAdviceClaim && !isTruncated,
     sanitized,
-    reason:    hasSuspiciousPrice ? 'Pricing sanitized' : undefined,
+    reason:    hasSuspiciousPrice ? 'Pricing sanitized'
+             : isTruncated        ? 'Reply appears truncated'
+             : undefined,
   };
+}
+
+/**
+ * Cheap heuristic for a reply that stops mid-thought.
+ *
+ * Intentionally conservative — it only fires on the unambiguous case (no
+ * terminal punctuation at all), because normal replies legitimately end in
+ * '.', '?', '!', an ellipsis, or a closing quote/bracket/emoji. A trailing
+ * ':' counts as complete too: the booking flow's slot-list lead-in ("Here are
+ * our next available times:") is a normal, finished reply. Empty replies count
+ * as incomplete: an empty string is never a valid answer.
+ */
+function looksTruncated(reply: string): boolean {
+  const trimmed = reply.trim();
+  if (trimmed.length === 0) return true;
+
+  // Strip trailing closers/emoji so `He said "hello."` and `Great! 🎉` still
+  // resolve to their real terminal punctuation.
+  const stripped = trimmed.replace(/[\s"'”’)\]\p{Extended_Pictographic}]+$/u, '');
+  if (stripped.length === 0) return false;   // punctuation/emoji-only reply
+
+  return !/[.!?…:]$/.test(stripped);
 }
 
 /**
