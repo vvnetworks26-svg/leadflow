@@ -343,6 +343,72 @@ describe('SlotGenerator.generate — open hours', () => {
   });
 });
 
+describe('SlotGenerator — negative-UTC-offset timezones (advanceToNextDay)', () => {
+  // Regression: advanceToNextDay used to derive "tomorrow" by adding 24h of
+  // raw UTC ms and then reinterpreting that date string as if it were
+  // already UTC midnight — for any negative-offset zone (all of the US)
+  // this silently drops the offset and can resolve back to the *same*
+  // local day, so the cursor never strictly advances. Combined with the
+  // closed-day skip loop (isOpen: false -> call advanceToNextDay -> continue),
+  // this hung SlotGenerator.generate() in an infinite loop for any
+  // negative-offset business with a closed weekend day — reproduced
+  // directly against the unfixed code before this test was added.
+  const laHours = {
+    monday: alwaysOpen, tuesday: alwaysOpen, wednesday: alwaysOpen,
+    thursday: alwaysOpen, friday: alwaysOpen,
+    saturday: alwaysClosed, sunday: alwaysClosed,
+    emergencyAfterHours: true, vacationMode: false, holidays: [], closedDates: [],
+  };
+  const laRules = {
+    minimumNoticeHours: 0, maximumBookingDays: 14,
+    defaultDurationMins: 60, slotIntervalMins: 60,
+    sameDayBooking: true, weekendBooking: false, businessBufferMins: 0,
+  };
+  // Friday 2026-08-14, ~4pm Pacific (UTC-7 in August) — the query window
+  // spans the closed Sat/Sun into the following Monday.
+  const fridayEveningPT = new Date('2026-08-14T23:00:00Z').getTime();
+
+  it('terminates promptly instead of hanging when skipping a closed weekend in a negative-offset timezone', () => {
+    const t0 = Date.now();
+    const result = SlotGenerator.generate({
+      organizationId: 'org-test',
+      businessHours:  laHours,
+      bookingRules:   laRules,
+      timezone:       'America/Los_Angeles',
+      blockedSlots:   [],
+      startDateUtc:   new Date(fridayEveningPT).toISOString().slice(0, 10),
+      endDateUtc:     new Date(fridayEveningPT + 10 * 86400_000).toISOString().slice(0, 10),
+      nowMs:          fridayEveningPT,
+    });
+    const elapsedMs = Date.now() - t0;
+    assert.ok(elapsedMs < 2000, `SlotGenerator.generate took ${elapsedMs}ms — should be near-instant, not hang`);
+    assert.ok(result.hasOpenSlots);
+  });
+
+  it('correctly skips the closed Sat/Sun and resumes Monday morning, in local time', () => {
+    const result = SlotGenerator.generate({
+      organizationId: 'org-test',
+      businessHours:  laHours,
+      bookingRules:   laRules,
+      timezone:       'America/Los_Angeles',
+      blockedSlots:   [],
+      startDateUtc:   new Date(fridayEveningPT).toISOString().slice(0, 10),
+      endDateUtc:     new Date(fridayEveningPT + 10 * 86400_000).toISOString().slice(0, 10),
+      nowMs:          fridayEveningPT,
+    });
+    // No slot should fall on the closed Saturday/Sunday in the business's
+    // own local calendar date (Aug 15 / Aug 16).
+    const closedDaySlots = result.slots.filter(s =>
+      s.startLocal.slice(0, 10) === '2026-08-15' || s.startLocal.slice(0, 10) === '2026-08-16'
+    );
+    assert.equal(closedDaySlots.length, 0);
+    // The first slot after Friday's remaining hours must be Monday morning.
+    const mondaySlot = result.slots.find(s => s.startLocal.slice(0, 10) === '2026-08-17');
+    assert.ok(mondaySlot, 'expected a Monday 2026-08-17 slot after skipping the closed weekend');
+    assert.equal(mondaySlot!.startLocal.slice(11, 16), '08:00', 'first Monday slot should be at opening time');
+  });
+});
+
 describe('SlotGenerator — holidays and closed dates', () => {
   it('no slots on a holiday', () => {
     const hours = {
