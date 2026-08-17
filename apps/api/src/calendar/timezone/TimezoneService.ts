@@ -13,13 +13,47 @@ const KNOWN_TIMEZONES = Intl.supportedValuesOf
   ? Intl.supportedValuesOf('timeZone')
   : [];                                          // fallback for older Node
 
+// isValidTimezone() and utcToLocal() are the hottest functions in the whole
+// booking-engine — SlotGenerator calls them (directly or via localToUtc's
+// binary search) tens of thousands of times per availability request, once
+// per candidate slot/day-boundary across the org's full maximumBookingDays
+// window. Each call used to construct a brand-new Intl.DateTimeFormat, which
+// is not free (ICU locale/timezone data resolution) — measured at 20,261
+// constructions for a single 90-day request, ~12s on a throttled free-tier
+// instance. Every construction for a given timezone uses identical, hardcoded
+// options, so one Intl.DateTimeFormat instance can be built once and reused
+// forever — instances are stateless across format()/formatToParts() calls.
+const validityCache  = new Map<string, boolean>();
+const formatterCache = new Map<string, Intl.DateTimeFormat>();
+
 export function isValidTimezone(tz: string): boolean {
+  const cached = validityCache.get(tz);
+  if (cached !== undefined) return cached;
+
+  let valid: boolean;
   try {
     Intl.DateTimeFormat(undefined, { timeZone: tz });
-    return true;
+    valid = true;
   } catch {
-    return false;
+    valid = false;
   }
+  validityCache.set(tz, valid);
+  return valid;
+}
+
+/** Cached formatter for utcToLocal()'s fixed field set — one instance per timezone. */
+function getLocalPartsFormatter(tz: string): Intl.DateTimeFormat {
+  let fmt = formatterCache.get(tz);
+  if (!fmt) {
+    fmt = new Intl.DateTimeFormat('en-US', {
+      timeZone:   tz,
+      year:       'numeric', month:  '2-digit', day:    '2-digit',
+      hour:       '2-digit', minute: '2-digit', second: '2-digit',
+      hour12:     false,     weekday:'short',
+    });
+    formatterCache.set(tz, fmt);
+  }
+  return fmt;
 }
 
 // ─── Conversion helpers ───────────────────────────────────────────────────────
@@ -33,13 +67,8 @@ export function utcToLocal(utcDate: Date, timezone: string): {
   hour:   number; minute:number; second: number;
   weekday:number; iso:   string;
 } {
-  const tz = isValidTimezone(timezone) ? timezone : 'UTC';
-  const fmt = new Intl.DateTimeFormat('en-US', {
-    timeZone:   tz,
-    year:       'numeric', month:  '2-digit', day:    '2-digit',
-    hour:       '2-digit', minute: '2-digit', second: '2-digit',
-    hour12:     false,     weekday:'short',
-  });
+  const tz  = isValidTimezone(timezone) ? timezone : 'UTC';
+  const fmt = getLocalPartsFormatter(tz);
 
   const parts = Object.fromEntries(fmt.formatToParts(utcDate).map(p => [p.type, p.value]));
 

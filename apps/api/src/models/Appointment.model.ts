@@ -44,5 +44,13 @@ const AppointmentSchema = new Schema<AppointmentDocument>(
 AppointmentSchema.index({ organizationId: 1, createdAt: -1 });
 AppointmentSchema.index({ organizationId: 1, status: 1 });
 AppointmentSchema.index({ organizationId: 1, leadId: 1 });
+// Serves widgetGetAvailability's { organizationId, status, date: {$gte,$lte} }
+// blocked-slot lookup. Not the dominant cost behind the ~12s availability
+// investigation (root cause was uncached Intl.DateTimeFormat construction in
+// the booking-engine — see SlotGenerator.ts/BusinessHours.ts/TimezoneService.ts),
+// but this query pattern has no compound index today, so without it Mongo
+// falls back to an in-memory date-range filter over every appointment the
+// org has — fine at demo scale, a real cost once appointment volume grows.
+AppointmentSchema.index({ organizationId: 1, date: 1 });
 
 export const AppointmentModel = model<AppointmentDocument>('Appointment', AppointmentSchema);
