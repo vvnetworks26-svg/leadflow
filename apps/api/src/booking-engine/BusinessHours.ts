@@ -15,6 +15,12 @@ type DayKey = typeof DAYS[number];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// isWeekend()/isSameDay() call this once per SlotGenerator loop iteration — a
+// fresh Intl.DateTimeFormat per call was part of the ~20k-construction cost
+// behind a ~12s availability request (see SlotGenerator.ts). The shape is
+// fixed per timezone, so one cached instance is safe to reuse indefinitely.
+const localComponentsFormatters = new Map<string, Intl.DateTimeFormat>();
+
 function toMinutes(time: string): number {
   const [h = '0', m = '0'] = time.split(':');
   return parseInt(h, 10) * 60 + parseInt(m, 10);
@@ -29,16 +35,20 @@ function getLocalComponents(utcMs: number, timezone: string): {
   const d   = new Date(utcMs);
   const tz  = timezone || 'UTC';
   try {
-    const fmt = new Intl.DateTimeFormat('en-US', {
-      timeZone: tz,
-      weekday:  'short',
-      hour:     '2-digit',
-      minute:   '2-digit',
-      hour12:   false,
-      year:     'numeric',
-      month:    '2-digit',
-      day:      '2-digit',
-    });
+    let fmt = localComponentsFormatters.get(tz);
+    if (!fmt) {
+      fmt = new Intl.DateTimeFormat('en-US', {
+        timeZone: tz,
+        weekday:  'short',
+        hour:     '2-digit',
+        minute:   '2-digit',
+        hour12:   false,
+        year:     'numeric',
+        month:    '2-digit',
+        day:      '2-digit',
+      });
+      localComponentsFormatters.set(tz, fmt);
+    }
     const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
     const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const dow      = weekdays.indexOf(parts.weekday ?? 'Mon');

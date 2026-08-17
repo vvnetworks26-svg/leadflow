@@ -358,6 +358,18 @@ export async function widgetGetAvailability(req: Request, res: Response, next: N
     // supports duration via service-name matching (AvailabilityRequest's
     // own durationMinutes field is explicitly documented as an "override
     // catalog duration" escape hatch for exactly this).
+    // A chat SlotPicker is a numbered list of buttons, not a calendar:
+    // dumping hundreds of slots into one chat bubble is unusable. Cap to the
+    // nearest MAX_WIDGET_SLOTS, soonest first — the AI's own framing ("Here
+    // are our next available times") already sets the expectation of a short
+    // list, not an exhaustive one. Passed as maxSlots below so SlotGenerator
+    // stops walking the org's full maximumBookingDays window (90 days by
+    // default) once it has enough — this bounds what's COMPUTED, not just
+    // what's returned. Without it, a single request generates every open
+    // slot across the full window (1,000+ for a typical org) only to throw
+    // away all but 10 of them.
+    const MAX_WIDGET_SLOTS = 10;
+
     const effectiveRules = BookingRulesService.forRequest(identity, '', false);
     const availabilityReq: AvailabilityRequest = {
       organizationId:  identity.organizationId,
@@ -369,21 +381,15 @@ export async function widgetGetAvailability(req: Request, res: Response, next: N
       startDateUtc:    startDate,
       endDateUtc:      endDate,
       nowMs,
+      maxSlots:        MAX_WIDGET_SLOTS,
     };
     const availability = await AvailabilityService.getSlots(availabilityReq, CalendarProviderRegistry.default());
-
-    // The generator computes every open slot across the org's full
-    // maximumBookingDays window (90 by default) — correct for the
-    // engine's own purpose, but a chat SlotPicker is a numbered list of
-    // buttons, not a calendar: dumping hundreds of slots into one chat
-    // bubble is unusable. Cap to the nearest MAX_WIDGET_SLOTS, soonest
-    // first — the AI's own framing ("Here are our next available times")
-    // already sets the expectation of a short list, not an exhaustive one.
-    const MAX_WIDGET_SLOTS = 10;
 
     // Map the booking-engine's AppointmentSlot shape to the widget's TimeSlot
     // shape — the same date/time/displayDate/displayTime fields WidgetBookSchema
     // (POST /:token/book) accepts, so a selected slot can be posted straight through.
+    // The slice is now a no-op in practice (maxSlots already bounded the
+    // array) — kept as a defensive guarantee on the response shape.
     const slots = availability.slots.slice(0, MAX_WIDGET_SLOTS).map(s => {
       const [displayDate, displayTime] = s.displayLabel.split(' at ');
       return {

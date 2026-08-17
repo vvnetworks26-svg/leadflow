@@ -45,6 +45,15 @@ export interface AvailabilityRequest {
   readonly endDateUtc?:      string;          // ISO date YYYY-MM-DD (default +7 days)
   /** Injectable clock for deterministic testing */
   readonly nowMs?:           number;
+  /**
+   * Stop generating once this many slots are found, instead of walking the
+   * full maximumBookingDays window. Omit to compute the entire window (the
+   * dashboard date-picker and `suggested`'s evenly-distributed sampling both
+   * rely on that). Only set this when the caller is genuinely going to
+   * discard everything past the first N anyway (e.g. the widget's fixed-size
+   * SlotPicker) — capping here limits what's computed, not just returned.
+   */
+  readonly maxSlots?:        number;
 }
 
 export interface BlockedSlot {

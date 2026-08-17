@@ -19,6 +19,26 @@ type DayKey = typeof DAYS[number];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// getLocalDayKey/getLocalMinutes/getLocalDateStr each run once per loop
+// iteration while walking the org's full maximumBookingDays window (up to
+// tens of thousands of iterations for a 90-day window) — constructing a new
+// Intl.DateTimeFormat per call here was the dominant cost in a ~12s
+// availability request (20,261 Intl.DateTimeFormat constructions measured
+// for one call). Each shape below is fixed (only timeZone varies), so one
+// cached instance per timezone is safe to reuse indefinitely.
+const dayKeyFormatters  = new Map<string, Intl.DateTimeFormat>();
+const minutesFormatters = new Map<string, Intl.DateTimeFormat>();
+const dateStrFormatters = new Map<string, Intl.DateTimeFormat>();
+
+function cached(cache: Map<string, Intl.DateTimeFormat>, timezone: string, build: () => Intl.DateTimeFormat): Intl.DateTimeFormat {
+  let fmt = cache.get(timezone);
+  if (!fmt) {
+    fmt = build();
+    cache.set(timezone, fmt);
+  }
+  return fmt;
+}
+
 function toMinutes(time: string): number {
   const [h = '0', m = '0'] = time.split(':');
   return parseInt(h, 10) * 60 + parseInt(m, 10);
@@ -34,9 +54,9 @@ function overlaps(
 function getLocalDayKey(utcMs: number, timezone: string): DayKey {
   const d = new Date(utcMs);
   try {
-    const fmt = new Intl.DateTimeFormat('en-US', {
+    const fmt = cached(dayKeyFormatters, timezone, () => new Intl.DateTimeFormat('en-US', {
       timeZone: timezone, weekday: 'short',
-    });
+    }));
     const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
     const map: Record<string, DayKey> = {
       Sun: 'sunday', Mon: 'monday', Tue: 'tuesday', Wed: 'wednesday',
@@ -52,9 +72,9 @@ function getLocalDayKey(utcMs: number, timezone: string): DayKey {
 function getLocalMinutes(utcMs: number, timezone: string): number {
   const d = new Date(utcMs);
   try {
-    const fmt = new Intl.DateTimeFormat('en-US', {
+    const fmt = cached(minutesFormatters, timezone, () => new Intl.DateTimeFormat('en-US', {
       timeZone: timezone, hour: '2-digit', minute: '2-digit', hour12: false,
-    });
+    }));
     const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
     const h = parseInt(parts.hour ?? '0', 10) % 24;
     const m = parseInt(parts.minute ?? '0', 10);
@@ -67,9 +87,9 @@ function getLocalMinutes(utcMs: number, timezone: string): number {
 function getLocalDateStr(utcMs: number, timezone: string): string {
   const d = new Date(utcMs);
   try {
-    const fmt = new Intl.DateTimeFormat('en-US', {
+    const fmt = cached(dateStrFormatters, timezone, () => new Intl.DateTimeFormat('en-US', {
       timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
-    });
+    }));
     const parts = Object.fromEntries(fmt.formatToParts(d).map(p => [p.type, p.value]));
     return `${parts.year}-${parts.month?.padStart(2,'0')}-${parts.day?.padStart(2,'0')}`;
   } catch {
@@ -123,6 +143,7 @@ export const SlotGenerator = {
       nowMs = Date.now(),
     } = req;
 
+    const maxSlots     = req.maxSlots;
     const guestTz      = safeTimezone(req.guestTimezone ?? timezone);
     const durationMins = req.durationMinutes ?? bookingRules.defaultDurationMins;
     const intervalMins = bookingRules.slotIntervalMins;
@@ -238,6 +259,12 @@ export const SlotGenerator = {
           durationMinutes: durationMins,
           available:       true,
         });
+
+        // Stop computing once the caller has as many as it will ever use —
+        // e.g. the widget's fixed-size SlotPicker. Only when maxSlots was
+        // explicitly requested; open-ended callers (dashboard date-picker,
+        // suggested's evenly-distributed sampling) still get the full window.
+        if (maxSlots !== undefined && slots.length >= maxSlots) break;
       }
 
       cursor += intervalMs;
