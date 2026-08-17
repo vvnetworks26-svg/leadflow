@@ -42,7 +42,7 @@ export default function DashboardLayout() {
     disabled?: boolean;
   }> = [
     { name: 'Overview',          path: '/dashboard',                icon: LayoutDashboard },
-    { name: 'Inbox',             path: '/dashboard/inbox',          icon: MessageSquare,  badge: 'Live' },
+    { name: 'Inbox',             path: '/dashboard/inbox',          icon: MessageSquare,  badge: 'Soon' },
     { name: 'Leads',             path: '/dashboard/leads',          icon: Users },
     { name: 'Appointments',      path: '/dashboard/appointments',   icon: Calendar },
     { name: 'Analytics',         path: '/dashboard/analytics',      icon: BarChart3 },

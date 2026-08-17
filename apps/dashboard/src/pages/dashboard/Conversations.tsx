@@ -1,14 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { apiService } from '../../services/api';
 import { Conversation, Message } from '../../types';
-import { 
-  Send, 
-  Bot, 
-  User, 
-  MessageSquare, 
-  Archive, 
-  Check, 
-  Clock, 
+import {
+  Bot,
+  User,
+  MessageSquare,
+  Archive,
+  Check,
+  Clock,
   AlertCircle,
   Phone,
   Search,
@@ -18,10 +17,8 @@ import {
 export default function Conversations() {
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConvId, setActiveConvId] = useState<string>('');
-  const [inputText, setInputText] = useState('');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  const [isBotResponding, setIsBotResponding] = useState(false);
 
   const chatEndRef = useRef<HTMLDivElement>(null);
 
@@ -47,46 +44,9 @@ export default function Conversations() {
     if (chatEndRef.current) {
       chatEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
-  }, [activeConvId, conversations, isBotResponding]);
+  }, [activeConvId, conversations]);
 
   const activeConv = conversations.find(c => c.id === activeConvId);
-
-  // Send message
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputText.trim() || !activeConvId) return;
-
-    const typedText = inputText;
-    setInputText('');
-
-    try {
-      // 1. Add agent message to active conversation
-      await apiService.addMessageToConversation(activeConvId, 'agent', typedText);
-      await loadConversations(false);
-
-      // 2. Simulate smart automated HVAC AI response after 1 second!
-      setIsBotResponding(true);
-      await new Promise(resolve => setTimeout(resolve, 1100));
-
-      let responseText = "Understood. Our dispatch line has captured this information. An HVAC specialist will touch base shortly.";
-      
-      const lower = typedText.toLowerCase();
-      if (lower.includes('schedule') || lower.includes('appointment') || lower.includes('book')) {
-        responseText = "I see you're looking to schedule. I can book our Senior Technician, Mike Reynolds, to check your compressor tomorrow. Shall I lock in that dispatch?";
-      } else if (lower.includes('price') || lower.includes('cost') || lower.includes('quote')) {
-        responseText = "Diagnostic visit is $89, which we fully wave if you approve our repair solution! For full replacements, estimates are 100% free.";
-      } else if (lower.includes('leak') || lower.includes('water')) {
-        responseText = "Water leaking from a furnace coil is usually a clogged drain line or iced coil. Turn off your system cooling mode to prevent flooding!";
-      }
-
-      await apiService.addMessageToConversation(activeConvId, 'ai', responseText);
-      await loadConversations(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setIsBotResponding(false);
-    }
-  };
 
   // Toggle archive status
   const handleArchiveStatus = async (id: string, status: 'archived' | 'active' | 'completed') => {
@@ -196,9 +156,8 @@ export default function Conversations() {
 
               {/* Header Actions */}
               <div className="flex items-center space-x-2">
-                <div className="bg-emerald-50 text-emerald-800 border border-emerald-100 rounded-lg px-2.5 py-1 text-[10px] font-semibold flex items-center space-x-1">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                  <span>LeadFlow AI Copilot On</span>
+                <div className="bg-gray-100 text-gray-500 border border-gray-200 rounded-lg px-2.5 py-1 text-[10px] font-semibold flex items-center space-x-1">
+                  <span>AI Copilot — Coming Soon</span>
                 </div>
                 <button
                   onClick={() => handleArchiveStatus(activeConv.id, 'archived')}
@@ -242,35 +201,13 @@ export default function Conversations() {
                 );
               })}
 
-              {/* Simulating Bot Responding Loader */}
-              {isBotResponding && (
-                <div className="p-3.5 rounded-xl text-xs bg-white border border-slate-200 text-slate-500 rounded-tl-none w-fit flex items-center space-x-2">
-                  <div className="flex space-x-1">
-                    <span className="h-2 w-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                    <span className="h-2 w-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                    <span className="h-2 w-2 rounded-full bg-slate-400 animate-bounce" style={{ animationDelay: '300ms' }}></span>
-                  </div>
-                  <span>AI Copilot drafting HVAC reply...</span>
-                </div>
-              )}
-
               <div ref={chatEndRef} />
             </div>
 
-            {/* Support Send Input Form */}
-            <form onSubmit={handleSend} className="p-4 border-t border-slate-200 bg-white flex items-center space-x-3">
-              <input
-                type="text"
-                required
-                value={inputText}
-                onChange={(e) => setInputText(e.target.value)}
-                placeholder="Type dispatcher override or reply to client (AI pauses)..."
-                className="flex-1 px-4 py-2.5 rounded-lg border border-slate-200 focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 outline-none text-xs bg-slate-50/50 text-slate-800"
-              />
-              <button type="submit" className="bg-indigo-600 hover:bg-indigo-700 text-white p-2.5 rounded-lg transition shadow-md shadow-indigo-50">
-                <Send className="h-4.5 w-4.5" />
-              </button>
-            </form>
+            {/* Replying from the dashboard is not available yet — conversations are read-only for now. */}
+            <div className="p-4 border-t border-slate-200 bg-slate-50 text-center text-xs text-slate-400">
+              Replying from the dashboard is coming soon. Conversations are read-only for now.
+            </div>
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-4 text-center">
