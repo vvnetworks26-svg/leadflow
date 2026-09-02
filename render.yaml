@@ -1,13 +1,11 @@
 # render.yaml — Infrastructure-as-code for the "leadflow" API service.
 #
-# ─── IMPORTANT: file location ────────────────────────────────────────────────
-# Render only auto-discovers a Blueprint at the REPOSITORY ROOT. This file sits
-# at apps/api/render.yaml because the task scoping this work required zero diff
-# outside apps/api. As written it therefore documents intent and is ready to be
-# adopted, but Render will NOT pick it up automatically from here — moving it to
-# the repo root (or pointing a Blueprint at it explicitly) is a required
-# follow-up before it has any effect. Flagged rather than silently placed at the
-# root, which would have violated the stated scope.
+# ─── File location ───────────────────────────────────────────────────────────
+# This file MUST stay at the repository root: Render only auto-discovers a
+# Blueprint here. It briefly lived at apps/api/render.yaml, where Render would
+# never have found it. The service builds from apps/api, but that is expressed
+# via `rootDir:` below — not by moving this file. Do not relocate it back into
+# apps/api.
 #
 # ─── IMPORTANT: this file does not change anything by itself ─────────────────
 # Writing `plan:` and `region:` here does NOT guarantee the live service matches
