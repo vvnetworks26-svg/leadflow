@@ -9,8 +9,9 @@
  */
 
 import axios, { AxiosError, InternalAxiosRequestConfig } from 'axios';
+import { getApiUrl } from '@leadflow/shared';
 
-const BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL as string | undefined) ?? 'http://localhost:4000';
+const BASE_URL = getApiUrl();
 
 export const apiClient = axios.create({
   baseURL: `${BASE_URL}/api/v1`,

@@ -6,9 +6,10 @@ import {
   Play,
   Sparkles,
 } from 'lucide-react';
+import { getDashboardUrl } from '@leadflow/shared';
 
 export default function Hero() {
-  const dashboardUrl = import.meta.env.VITE_DASHBOARD_URL ?? 'http://localhost:3000';
+  const dashboardUrl = getDashboardUrl();
 
   return (
     <section className="relative pt-20 pb-24 px-6 overflow-hidden">

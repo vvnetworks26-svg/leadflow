@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
 import { CheckCircle } from 'lucide-react';
 import { widgetApiClient } from '../services/api/widgetApiClient';
+import { getDashboardUrl } from '@leadflow/shared';
 
 export default function Contact() {
-  const dashboardUrl = import.meta.env.VITE_DASHBOARD_URL ?? 'http://localhost:3000';
+  const dashboardUrl = getDashboardUrl();
 
   const [contactForm, setContactForm] = useState({
     name: '', email: '', phone: '', address: '', hvacNeed: 'AC Repair', message: '',

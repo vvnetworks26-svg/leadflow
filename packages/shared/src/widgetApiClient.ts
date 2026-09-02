@@ -16,11 +16,11 @@
 
 import axios from 'axios';
 import type { Lead, Conversation } from '@leadflow/types';
+import { getApiUrl } from './config/appUrls';
 
 // ─── Configuration ────────────────────────────────────────────────────────────
 
-const BASE_URL: string =
-  ((typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) || 'http://localhost:4000') as string;
+const BASE_URL: string = getApiUrl();
 
 const WIDGET_TOKEN: string =
   ((typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_WIDGET_TOKEN) || '') as string;

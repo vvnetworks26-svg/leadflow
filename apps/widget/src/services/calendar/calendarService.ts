@@ -10,7 +10,13 @@
  */
 
 import { widgetApiClient } from '../api/widgetApiClient';
+import { getApiUrl } from '@leadflow/shared';
 import type { TimeSlot, BookingConfirmation } from '../../types';
+
+// Resolved at module load — outside getAvailableSlots' try/catch below, so a
+// missing VITE_API_URL in production throws immediately instead of being
+// swallowed into a silent "no slots available" result.
+const BASE_URL: string = getApiUrl();
 
 export const calendarService = {
   /**
@@ -26,8 +32,6 @@ export const calendarService = {
       const config = await widgetApiClient.getConfig();
       // The API endpoint mirrors the dashboard's slot generation logic.
       // Token is resolved by widgetApiClient internally.
-      const BASE_URL: string =
-        ((typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_API_URL) || 'http://localhost:4000') as string;
       const TOKEN: string =
         ((typeof import.meta !== 'undefined' && (import.meta as any).env?.VITE_WIDGET_TOKEN) || '') as string;
 
