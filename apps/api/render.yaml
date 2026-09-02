@@ -1,0 +1,114 @@
+# render.yaml — Infrastructure-as-code for the "leadflow" API service.
+#
+# ─── IMPORTANT: file location ────────────────────────────────────────────────
+# Render only auto-discovers a Blueprint at the REPOSITORY ROOT. This file sits
+# at apps/api/render.yaml because the task scoping this work required zero diff
+# outside apps/api. As written it therefore documents intent and is ready to be
+# adopted, but Render will NOT pick it up automatically from here — moving it to
+# the repo root (or pointing a Blueprint at it explicitly) is a required
+# follow-up before it has any effect. Flagged rather than silently placed at the
+# root, which would have violated the stated scope.
+#
+# ─── IMPORTANT: this file does not change anything by itself ─────────────────
+# Writing `plan:` and `region:` here does NOT guarantee the live service matches
+# them. vvnetworks26-svg/vv-networks/render.yaml declares `region: oregon` while
+# that service actually runs in singapore — it has been out of sync with reality
+# for a while. Treat a Blueprint sync as "requested", then CONFIRM in the Render
+# dashboard that it applied.
+#
+# The env var list below is derived from apps/api/src/config/env.ts — the only
+# file in this service that reads process.env — NOT from .env.example, which can
+# and does drift from what the code actually consumes.
+
+services:
+  - type: web
+    name: leadflow
+    runtime: node
+    # Matches the CURRENT LIVE region. Do not "fix" this to oregon to match
+    # vv-networks — that file is the one that's wrong.
+    region: singapore
+    # The live service is currently on the free plan; this declares the intended
+    # upgrade to starter (free instances sleep, which breaks the health check).
+    # Confirm in the dashboard that the sync actually applied it.
+    plan: starter
+    # Real readiness probe: 503 when Mongo is disconnected.
+    # NOT /api/v1/health — that endpoint always returns 200 regardless of DB
+    # state and is useless as a health check. See src/controllers/readyController.ts.
+    healthCheckPath: /api/v1/ready
+    # Monorepo: the service builds from apps/api. Path is repo-root-relative.
+    rootDir: apps/api
+    buildCommand: npm install && npm run build
+    startCommand: npm start
+    autoDeploy: true
+
+    envVars:
+      # ── Core runtime ──────────────────────────────────────────────────────
+      - key: NODE_ENV
+        value: production
+      - key: PORT
+        value: "10000"                # Render's default injected port
+      - key: API_VERSION
+        value: "1.0.0"
+
+      # ── Datastores ────────────────────────────────────────────────────────
+      # Both carry credentials in their connection string — never commit values.
+      - key: MONGODB_URI
+        sync: false
+      - key: REDIS_URL
+        sync: false                   # BullMQ (ai/pipeline/) — required in production
+
+      # ── Auth secrets ──────────────────────────────────────────────────────
+      # Deliberately NOT `generateValue: true`. This service has live signing
+      # secrets already set in the Render dashboard; generating new values here
+      # would rotate them and invalidate every existing session and refresh
+      # token in production.
+      - key: JWT_SECRET
+        sync: false
+      - key: JWT_REFRESH_SECRET
+        sync: false
+      - key: JWT_EXPIRES_IN
+        value: 15m
+      - key: JWT_REFRESH_EXPIRES_IN
+        value: 7d
+
+      # ── HTTP ──────────────────────────────────────────────────────────────
+      # Environment-specific and already set live — left as sync: false so a
+      # Blueprint sync cannot clobber the working production value.
+      - key: CORS_ORIGINS
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+
+      # ── AI ────────────────────────────────────────────────────────────────
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_MODEL
+        value: gemini-3.6-flash       # model IDs change every few months
+      - key: OPENAI_API_KEY
+        sync: false                   # embeddings; falls back to a local mock if absent
+
+      # ── Google Calendar OAuth ─────────────────────────────────────────────
+      - key: GOOGLE_CLIENT_ID
+        sync: false
+      - key: GOOGLE_CLIENT_SECRET
+        sync: false
+      - key: GOOGLE_REDIRECT_URI
+        sync: false                   # prod callback URL; code default is localhost
+
+      # ── Microsoft 365 OAuth ───────────────────────────────────────────────
+      - key: MS_CLIENT_ID
+        sync: false
+      - key: MS_CLIENT_SECRET
+        sync: false
+
+      # ── Communications ────────────────────────────────────────────────────
+      - key: RESEND_API_KEY
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: META_WA_PHONE_ID
+        sync: false
+      - key: META_WA_TOKEN
+        sync: false
