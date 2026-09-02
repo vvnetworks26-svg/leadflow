@@ -71,7 +71,7 @@ export function buildGuardrails(params: {
     rails.push('Lead with urgency acknowledgement before anything else');
     rails.push('Keep the message under 2 sentences');
   }
-  if (params.stage === 'recommendation') {
+  if (params.stage === 'recommendation' || params.objective === 'offer_recommendation') {
     rails.push('Present at most 2 options');
     rails.push('Explain WHY each option fits this specific customer');
   }

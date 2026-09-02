@@ -112,6 +112,7 @@ export function buildConversationPlan(input: PlanInput): ConversationPlan {
     completionCriteria: Object.freeze([...completionCriteria]),
     recoveryStrategy:   Object.freeze({ ...recoveryStrategy }),
     blueprintId:        blueprint?.id ?? null,
+    stageId:            stage?.id ?? null,
     ruleApplied,
     isTerminal,
   });

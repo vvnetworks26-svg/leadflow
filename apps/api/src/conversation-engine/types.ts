@@ -190,6 +190,14 @@ export interface ConversationPlan {
   readonly completionCriteria:  readonly string[];
   readonly recoveryStrategy:    RecoveryStrategy;
   readonly blueprintId:         string | null;
+  /**
+   * id of the blueprint stage this objective resolved to (e.g. 'offer_appointment',
+   * 'confirm'), or null when no blueprint is loaded. buildConversationPlan() already
+   * resolves this stage to derive allowedTools/completionCriteria — exposing its id
+   * lets callers branch on the real blueprint stage instead of re-deriving it from
+   * the objective, or falling back to the legacy ConversationStage machine.
+   */
+  readonly stageId:             string | null;
   readonly ruleApplied:         string | null;           // id of the rule that fired (if any)
   readonly isTerminal:          boolean;
 }

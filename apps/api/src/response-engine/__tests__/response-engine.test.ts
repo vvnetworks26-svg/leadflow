@@ -63,7 +63,7 @@ function makePlan(overrides: Partial<L3Plan> = {}): L3Plan {
     nextState: 'collecting_info', fallbackState: 'collecting_info',
     completionCriteria: ['phoneCollected'],
     recoveryStrategy: { onAmbiguity: 'clarify_intent', onRepeat: 'clarify_intent', onContradiction: 'clarify_intent', onTopicChange: 'build_rapport', preserveContext: true },
-    blueprintId: null, ruleApplied: null, isTerminal: false,
+    blueprintId: null, stageId: null, ruleApplied: null, isTerminal: false,
     ...overrides,
   };
 }

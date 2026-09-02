@@ -63,7 +63,7 @@ function makeIntent(overrides: Partial<ResolvedIntent> = {}): ResolvedIntent {
 }
 
 function makeL3Plan(overrides: Partial<L3Plan> = {}): L3Plan {
-  return { objective: 'collect_phone', reason: 'test', requiredField: 'phone', questionType: 'phone', priority: 'high', allowedTools: [], nextState: 'collecting_info', fallbackState: 'collecting_info', completionCriteria: ['phoneCollected'], recoveryStrategy: { onAmbiguity: 'clarify_intent', onRepeat: 'clarify_intent', onContradiction: 'clarify_intent', onTopicChange: 'build_rapport', preserveContext: true }, blueprintId: null, ruleApplied: null, isTerminal: false, ...overrides };
+  return { objective: 'collect_phone', reason: 'test', requiredField: 'phone', questionType: 'phone', priority: 'high', allowedTools: [], nextState: 'collecting_info', fallbackState: 'collecting_info', completionCriteria: ['phoneCollected'], recoveryStrategy: { onAmbiguity: 'clarify_intent', onRepeat: 'clarify_intent', onContradiction: 'clarify_intent', onTopicChange: 'build_rapport', preserveContext: true }, blueprintId: null, stageId: null, ruleApplied: null, isTerminal: false, ...overrides };
 }
 
 function makeBlueprint(overrides: Partial<ResponseBlueprint> = {}): ResponseBlueprint {
