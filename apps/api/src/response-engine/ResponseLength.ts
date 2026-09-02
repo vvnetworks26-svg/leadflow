@@ -51,7 +51,7 @@ export function selectLength(params: {
 
   // Greeting / discovery → short natural opening
   if (stage === 'greeting' || objective === 'build_rapport') return 'Short';
-  if (stage === 'discovery') return 'Short';
+  if (stage === 'discovery' || objective === 'collect_service_details') return 'Short';
 
   return 'Short';
 }

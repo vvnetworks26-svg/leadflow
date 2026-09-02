@@ -35,6 +35,7 @@ import { qualifyLead, shouldTriggerBooking }           from './qualification';
 import { generateRecommendations }                     from './recommendation';
 import { computeNextStage, STAGE_INSTRUCTIONS }        from './conversation-state';
 import { buildSystemPrompt, type OrgContext }          from './prompt-builder';
+import { buildFallbackReply }                          from './fallback-reply';
 import { searchKnowledge }                             from './knowledge';
 import { executeTool, selectAutoTools }                from './tools';
 import { checkInput, checkOutput, fallbackResponse }   from './guardrails';
@@ -291,11 +292,11 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
       reply = geminiResp.text;
     } else {
       logger.warn({ error: geminiResp.error }, '[Orchestrator] Gemini failed, using fallback');
-      reply = buildFallbackReply(nextStage, updatedMemory, orgContext, plan);
+      reply = buildFallbackReply(l3Plan?.stageId ?? null, updatedMemory, orgContext, plan);
     }
   } else {
     // No API key — use rule-based fallback (dev/test mode)
-    reply = buildFallbackReply(nextStage, updatedMemory, orgContext, plan);
+    reply = buildFallbackReply(l3Plan?.stageId ?? null, updatedMemory, orgContext, plan);
   }
 
   // ── 11. Guardrail: output check ──────────────────────────────────────────
@@ -316,10 +317,32 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
 
   // ── 13. Booking triggered signal ─────────────────────────────────────────
-  // The state machine (step 8) is the single authority for booking transitions.
-  // We derive bookingTriggered from what the state machine decided, not by
-  // re-evaluating intent here. This eliminates the duplicate booking logic.
-  const bookingTriggered = nextStage === 'booking' && stage !== 'booking';
+  // Layer 3 (ConversationOrchestrationService) is the single authority for
+  // booking transitions — NOT the legacy ConversationStage machine.
+  //
+  // This previously read `nextStage === 'booking' && stage !== 'booking'`, which
+  // never fired in a blueprint-driven flow: computeNextStage() only promotes to
+  // 'booking' on an explicit booking-intent signal (Rule 4, ai/conversation-state.ts),
+  // and a plain factual answer ("Monday") never trips that. The legacy stage stalled
+  // at 'discovery' for the whole conversation, so bookingTriggered stayed false and
+  // the widget's SlotPicker — whose only entry point is this flag — never rendered,
+  // even though the booking endpoint's own Layer 3 stage gate was already open.
+  //
+  // Edge-triggering reuses a primitive that already exists rather than adding new
+  // tracking state: input.currentObjective is the objective persisted from the
+  // PREVIOUS turn (widgetController reads it in, then writes updatedObjective back
+  // after every turn), so comparing it against this turn's objective identifies the
+  // transition moment exactly once. While the objective holds at 'offer_appointment'
+  // on later turns, previous === current and this correctly stays false.
+  //
+  // Keyed on the objective rather than the stage id because the appointment-offering
+  // stage is named differently per blueprint ('offer_appointment' in hvac.repair /
+  // hvac.booking, 'emergency_book' in hvac.emergency) while all of them share the
+  // 'offer_appointment' objective — see conversation-engine/blueprints/default-blueprints.ts.
+  const previousObjective = input.currentObjective ?? null;
+  const bookingTriggered  =
+    updatedObjective === 'offer_appointment' &&
+    previousObjective !== 'offer_appointment';
 
   if (bookingTriggered) {
     if (updatedMemory.bookingStatus === 'none') {
@@ -449,37 +472,4 @@ function buildBlockedOutput(
     bookingTriggered:false,
     analyticsEvents,
   };
-}
-function buildFallbackReply(
-  stage:  ConversationStage,
-  memory: OrchestratorInput['memory'],
-  org:    OrgContext,
-  plan?:  LegacyConversationPlan,
-): string {
-  // Priority 1: planner has a concrete question — use it directly.
-  // This is the primary path when Gemini is unavailable.
-  if (plan?.questionToAsk) return plan.questionToAsk;
-
-  // Priority 2: stage-level fallbacks for non-collection stages.
-  // These are the only cases where the planner returns an empty question.
-  const name = memory.visitorName ? `, ${memory.visitorName}` : '';
-
-  switch (stage) {
-    case 'greeting':
-      return org.welcomeMessage || `Hi! I'm the ${org.name} assistant. How can I help you today?`;
-    case 'recommendation':
-      return `Based on what you've shared, I think our ${org.services[0] ?? 'solution'} would be a great fit. Want me to tell you more?`;
-    case 'objection':
-      return `That's a completely understandable concern${name}. Many of our clients felt the same way initially — would it help to hear how they got results?`;
-    case 'booking':
-      return `Absolutely${name}. What day and time works best for you?`;
-    case 'completed':
-      return `You're all set${name}! We'll be in touch shortly. Is there anything else I can help with?`;
-    case 'escalated':
-      return `I want to make sure you get the right help${name}. Could you share your email or phone number so our team can follow up directly?`;
-    default:
-      // Generic discovery/qualification fallback — planner should have caught this,
-      // but we need a safe final backstop.
-      return `Thanks for reaching out! How can I help you today?`;
-  }
 }

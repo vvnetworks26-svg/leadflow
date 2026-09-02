@@ -57,7 +57,7 @@ function makeIntent(): ResolvedIntent {
 }
 
 function makePlan(): L3Plan {
-  return { objective: 'collect_phone', reason: 'Need phone number', requiredField: 'phone', questionType: 'phone', priority: 'high', allowedTools: [], nextState: 'collecting_info', fallbackState: 'collecting_info', completionCriteria: ['phoneCollected'], recoveryStrategy: { onAmbiguity: 'clarify_intent', onRepeat: 'clarify_intent', onContradiction: 'clarify_intent', onTopicChange: 'build_rapport', preserveContext: true }, blueprintId: null, ruleApplied: null, isTerminal: false };
+  return { objective: 'collect_phone', reason: 'Need phone number', requiredField: 'phone', questionType: 'phone', priority: 'high', allowedTools: [], nextState: 'collecting_info', fallbackState: 'collecting_info', completionCriteria: ['phoneCollected'], recoveryStrategy: { onAmbiguity: 'clarify_intent', onRepeat: 'clarify_intent', onContradiction: 'clarify_intent', onTopicChange: 'build_rapport', preserveContext: true }, blueprintId: null, stageId: null, ruleApplied: null, isTerminal: false };
 }
 
 function makeBlueprint(): ResponseBlueprint {
