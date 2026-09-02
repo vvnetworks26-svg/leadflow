@@ -1,8 +1,10 @@
 import React from 'react';
 import { Code2 } from 'lucide-react';
+import { getApiUrl } from '@leadflow/shared';
 
 export default function WidgetSettings() {
   const widgetToken = (import.meta as any).env?.VITE_WIDGET_TOKEN ?? '';
+  const apiUrl = getApiUrl();
 
   return (
     <div className="space-y-6 animate-slide-up max-w-3xl">
@@ -24,7 +26,7 @@ export default function WidgetSettings() {
 {`<script>
   window.LeadFlowConfig = { token: "${widgetToken || 'YOUR_WIDGET_TOKEN'}" };
 </script>
-<script src="${(import.meta as any).env?.VITE_API_URL ?? 'http://localhost:4000'}/widget.js" async></script>`}
+<script src="${apiUrl}/widget.js" async></script>`}
         </pre>
       </div>
 

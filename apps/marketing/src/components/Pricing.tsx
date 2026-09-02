@@ -1,8 +1,9 @@
 import React from 'react';
 import { CheckCircle } from 'lucide-react';
+import { getDashboardUrl } from '@leadflow/shared';
 
 export default function Pricing() {
-  const dashboardUrl = import.meta.env.VITE_DASHBOARD_URL ?? 'http://localhost:3000';
+  const dashboardUrl = getDashboardUrl();
 
   return (
     <section id="pricing" className="py-24 bg-slate-50 border-b border-slate-100 px-6">
