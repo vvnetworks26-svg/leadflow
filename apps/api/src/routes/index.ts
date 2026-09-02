@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import healthRoutes          from './health.routes';
+import readyRoutes           from './ready.routes';
 import authRoutes            from './auth.routes';
 import leadRoutes            from './lead.routes';
 import appointmentRoutes     from './appointment.routes';
@@ -22,6 +23,9 @@ import platformRoutes        from './platform.routes';
 const router = Router();
 
 router.use('/health',          healthRoutes);
+// Readiness probe (Render healthCheckPath). Unlike /health, this returns 503
+// when Mongo is disconnected — see controllers/readyController.ts.
+router.use('/ready',           readyRoutes);
 router.use('/auth',            authRoutes);
 router.use('/organization',    organizationRoutes);
 router.use('/invitations',     invitationRoutes);
