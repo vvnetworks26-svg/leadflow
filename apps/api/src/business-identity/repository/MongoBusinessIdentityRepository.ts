@@ -14,6 +14,7 @@
 import { OrganizationModel } from '../../models/Organization.model';
 import { BusinessModel }     from '../../models/Business.model';
 import { buildBusinessIdentity } from '../BusinessIdentityFactory';
+import { AI_ASSISTANT_NAME } from '../../config/aiIdentity';
 import type { IBusinessIdentityRepository } from './BusinessIdentityRepository';
 import type { BusinessIdentity }            from '../types';
 import type { Industry }                    from '../types';
@@ -46,8 +47,8 @@ export class MongoBusinessIdentityRepository implements IBusinessIdentityReposit
 
     if (!org) return null;
 
-    const o = org  as any;
-    const b = biz  as any ?? {};
+    const o = org as any;
+    const b = biz as any ?? {};
 
     const hours = b.businessHours ?? {};
     const defaultDay = { isOpen: false, openTime: '08:00', closeTime: '17:00' };
@@ -122,7 +123,9 @@ export class MongoBusinessIdentityRepository implements IBusinessIdentityReposit
       },
 
       receptionistIdentity: {
-        aiName:               'Assistant',
+        // Fixed, product-wide brand name — same across every tenant's
+        // widget (like Intercom's "Fin"), not a per-org setting.
+        aiName:               AI_ASSISTANT_NAME,
         role:                 'Virtual Service Coordinator',
         greetingTemplate:     b.aiConfig?.welcomeMessage
                                 ?? "Hi! I'm {aiName}. How can I help you today?",
