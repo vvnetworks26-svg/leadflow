@@ -17,7 +17,6 @@ export type ButtonStyle = 'rounded' | 'pill' | 'square' | 'soft';
 export interface IBranding {
   companyName:     string;
   widgetName:      string;
-  assistantName:   string;
   welcomeMessage:  string;
   subtitle:        string;
   logoUrl:         string;
@@ -103,7 +102,7 @@ export interface WidgetConfigurationDocument extends Omit<IWidgetConfiguration, 
 
 const BrandingSchema = new Schema({
   companyName: { type: String, default: '' }, widgetName: { type: String, default: 'Chat with us' },
-  assistantName: { type: String, default: 'AI Assistant' }, welcomeMessage: { type: String, default: 'Hi! How can I help you today?' },
+  welcomeMessage: { type: String, default: 'Hi! How can I help you today?' },
   subtitle: { type: String, default: 'Typically replies instantly' },
   logoUrl: { type: String, default: '' }, avatarUrl: { type: String, default: '' }, faviconUrl: { type: String, default: '' },
 }, { _id: false });
