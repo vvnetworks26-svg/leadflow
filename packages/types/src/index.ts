@@ -153,7 +153,8 @@ export type BookingPhase =
   | 'confirmSlot'  // user chose a slot, awaiting confirmation
   | 'collectName'  // AI never captured the visitor's name — asking before booking
   | 'booking'      // POST /widget/book in flight
-  | 'booked';      // booking confirmed
+  | 'booked'       // booking confirmed
+  | 'failed';      // POST /widget/book was rejected or errored — no appointment created
 
 export interface ChatMessage {
   id: string;

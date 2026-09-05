@@ -193,6 +193,56 @@ describe('Rule Engine', () => {
     // human (95) vs critical (100) — critical wins
     assert.equal(result.ruleId, 'rule_critical_urgency');
   });
+
+  // Regression: rule_business_closed used to fire on turn one of ANY
+  // after-hours conversation regardless of progress, jumping straight to
+  // 'offer_appointment' (which exposes book_appointment) before name/phone
+  // were ever collected. The widget then showed the slot picker, the
+  // visitor picked a slot and submitted, and POST /book correctly rejected
+  // with 422 "hasn't collected the visitor's name and phone number yet" —
+  // a booking attempt that could never have succeeded, with no upfront
+  // indication to the visitor that anything was wrong until the very end.
+  const closedHours = { ...makeIdentity().businessHours, vacationMode: true };
+
+  it('does NOT fire business_closed when name/phone are not yet collected', () => {
+    const result = evaluateRules({
+      ...baseCtx,
+      memory: emptyRichMemory(), // progress: all false — nothing collected yet
+      businessHours: closedHours,
+      rules: HVAC_REPAIR_BLUEPRINT.rules,
+    });
+    assert.equal(result.fired, false, 'must not short-circuit to offer_appointment before contact info exists');
+  });
+
+  it('fires business_closed once name and phone are already collected', () => {
+    const collectedMemory = emptyRichMemory();
+    collectedMemory.progress.visitorNameCollected = true;
+    collectedMemory.progress.phoneCollected       = true;
+
+    const result = evaluateRules({
+      ...baseCtx,
+      memory: collectedMemory,
+      businessHours: closedHours,
+      rules: HVAC_REPAIR_BLUEPRINT.rules,
+    });
+    assert.equal(result.fired, true);
+    assert.equal(result.ruleId, 'rule_business_closed');
+    assert.equal(result.targetObjective, 'offer_appointment');
+  });
+
+  it('does not fire business_closed when only one of name/phone is collected', () => {
+    const partialMemory = emptyRichMemory();
+    partialMemory.progress.visitorNameCollected = true;
+    // phoneCollected left false
+
+    const result = evaluateRules({
+      ...baseCtx,
+      memory: partialMemory,
+      businessHours: closedHours,
+      rules: HVAC_REPAIR_BLUEPRINT.rules,
+    });
+    assert.equal(result.fired, false);
+  });
 });
 
 // ─── Objective Selector ───────────────────────────────────────────────────────

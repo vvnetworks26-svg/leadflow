@@ -743,7 +743,13 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
     const session = await AIConversationSessionModel
       .findOne({ widgetSessionId: d.widgetSessionId, organizationId: orgId })
       .lean();
-    if (!session) throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    if (!session) {
+      logger.warn(
+        { organizationId: orgId, widgetSessionId: d.widgetSessionId },
+        '[widgetBook] rejected: SESSION_NOT_FOUND',
+      );
+      throw new ApiError(404, 'Session not found', 'SESSION_NOT_FOUND');
+    }
 
     // ── Stage gate (Layer 3) ───────────────────────────────────────────────────
     // Reuses the exact blueprint-loading + plan-building logic the live
@@ -766,6 +772,17 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
       reason:        'widgetBook stage-gate check',
     });
     if (!stagePlan.allowedTools.includes('book_appointment')) {
+      logger.warn(
+        {
+          conversationId: session.conversationId,
+          organizationId: orgId,
+          widgetSessionId: d.widgetSessionId,
+          currentObjective: session.currentObjective ?? null,
+          workflowState:    session.workflowState    ?? null,
+          currentBlueprintId: session.currentBlueprintId ?? null,
+        },
+        '[widgetBook] rejected: BOOKING_STAGE_NOT_REACHED',
+      );
       throw new ApiError(
         409,
         "This conversation hasn't reached a stage where booking is available yet.",
@@ -792,6 +809,22 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
     // suspenders so a malformed memory.phone value 422s cleanly here rather
     // than throwing an uncaught ZodError (→ 500) further down in step 2.
     if (!customerName || !phone || phone.length < 7) {
+      // Never log the raw name/phone value here (PII on an unauthenticated
+      // endpoint's logs) — only what was missing and enough identifiers to
+      // pull up the real session/conversation record afterward.
+      logger.warn(
+        {
+          conversationId: session.conversationId,
+          organizationId: orgId,
+          widgetSessionId: d.widgetSessionId,
+          currentObjective: session.currentObjective ?? null,
+          workflowState:    session.workflowState    ?? null,
+          hasName:          Boolean(customerName),
+          hasPhone:         Boolean(phone),
+          phoneLength:      phone.length,
+        },
+        '[widgetBook] rejected: MISSING_CONTACT_INFO',
+      );
       throw new ApiError(
         422,
         "This conversation hasn't collected the visitor's name and phone number yet — booking can't be completed without them.",
@@ -837,6 +870,15 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
     };
     const guardResult = ToolGuards.check(toolCall, guardCtx);
     if (!guardResult.allowed) {
+      logger.warn(
+        {
+          conversationId: session.conversationId,
+          organizationId: orgId,
+          widgetSessionId: d.widgetSessionId,
+          reason: guardResult.reason ?? null,
+        },
+        '[widgetBook] rejected: BOOKING_BLOCKED',
+      );
       throw new ApiError(409, guardResult.reason ?? 'Booking blocked', 'BOOKING_BLOCKED');
     }
 
