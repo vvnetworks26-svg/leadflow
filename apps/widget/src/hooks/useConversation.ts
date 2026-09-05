@@ -473,7 +473,12 @@ export function useConversation() {
             "Something went wrong while booking your appointment. Our team will reach out to you directly to confirm."
           ),
         ],
-        bookingState: { phase: 'idle', availableSlots: [] },
+        // 'failed', not 'idle' — ChatWindow's generic "All set!" banner fires
+        // whenever stage === 'completed' unless bookingState.phase says
+        // otherwise. 'idle' looked like "no booking was ever attempted" to
+        // that check, so a rejected/errored booking silently rendered the
+        // happy-path banner right below this honest failure message.
+        bookingState: { phase: 'failed', availableSlots: [] },
       }));
     }
   }

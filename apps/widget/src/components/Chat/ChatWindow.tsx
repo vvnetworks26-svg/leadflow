@@ -20,8 +20,9 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
   const [atBottom, setAtBottom] = useState(true);
 
   const { stage, bookingState, isTyping, loading, messages } = state;
-  const isCompleted = stage === 'completed' && !isTyping;
-  const isBooked    = bookingState.phase === 'booked';
+  const isCompleted     = stage === 'completed' && !isTyping;
+  const isBooked        = bookingState.phase === 'booked';
+  const isBookingFailed = bookingState.phase === 'failed';
 
   // Track whether user has manually scrolled away from the bottom
   const handleScroll = useCallback(() => {
@@ -179,9 +180,12 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
           {isTyping && <TypingIndicator />}
         </AnimatePresence>
 
-        {/* Completion state */}
+        {/* Completion state — only the generic "wrapped up" banner; a
+            failed booking already has its own honest message in the
+            transcript above (see finalizeBooking's failure branch) and
+            must never also show this happy-path banner. */}
         <AnimatePresence>
-          {isCompleted && !isBooked && (
+          {isCompleted && !isBooked && !isBookingFailed && (
             <motion.div
               initial={{ opacity: 0, y: 6 }}
               animate={{ opacity: 1, y: 0 }}

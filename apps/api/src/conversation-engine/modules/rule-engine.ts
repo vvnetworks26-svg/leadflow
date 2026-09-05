@@ -64,7 +64,23 @@ function testTrigger(rule: BusinessRule, ctx: RuleContext): boolean {
     case 'urgency_critical':       return ctx.urgency === 'critical';
     case 'urgency_emergency':      return ctx.urgency === 'emergency';
     case 'customer_wants_human':   return ctx.requiresHuman || ctx.intent === 'human_representative';
-    case 'business_closed':        return !isOpen(ctx.businessHours, ctx.timezone, ctx.nowMs !== undefined ? new Date(ctx.nowMs) : new Date());
+    case 'business_closed':
+      // Requires name+phone already collected. Without this, the rule jumps
+      // straight to 'offer_appointment' (targetObjective below) — which
+      // exposes book_appointment in allowedTools — on turn one of ANY
+      // after-hours conversation, before the ordinary collect_service →
+      // collect_phone walk ever runs. The widget then shows the slot picker
+      // immediately; the visitor picks a slot and submits; POST /book's own
+      // belt-and-suspenders check correctly 422s ("hasn't collected the
+      // visitor's name and phone number yet") since session.memory never
+      // had them — a real booking attempt that could never have succeeded.
+      // Gating the trigger itself on progress means this rule now only
+      // fires once contact info already exists (at which point offering an
+      // immediate slot is genuinely safe); otherwise normal collection
+      // proceeds first via selectObjective's ordered walk.
+      return !isOpen(ctx.businessHours, ctx.timezone, ctx.nowMs !== undefined ? new Date(ctx.nowMs) : new Date())
+        && ctx.memory.progress.visitorNameCollected
+        && ctx.memory.progress.phoneCollected;
     case 'intent_complaint':       return ctx.intent === 'complaint';
     case 'intent_billing':         return ctx.intent === 'billing_question';
     case 'confidence_low':         return false;   // evaluated externally
