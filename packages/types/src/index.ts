@@ -200,6 +200,9 @@ export interface ChatState {
   loading: boolean;
   /** Last error message, if any */
   error: string | null;
+  /** True while automatically retrying a failed/hung session-creation
+   *  attempt — surfaced in the UI so a stall is visible, not silent. */
+  reconnecting: boolean;
 }
 
 // ─── Legacy aliases kept for backwards-compat with non-chat code ──────

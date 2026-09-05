@@ -19,7 +19,7 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
   const bottomRef      = useRef<HTMLDivElement>(null);
   const [atBottom, setAtBottom] = useState(true);
 
-  const { stage, bookingState, isTyping, loading, messages } = state;
+  const { stage, bookingState, isTyping, loading, messages, reconnecting } = state;
   const isCompleted     = stage === 'completed' && !isTyping;
   const isBooked        = bookingState.phase === 'booked';
   const isBookingFailed = bookingState.phase === 'failed';
@@ -150,12 +150,24 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
         aria-atomic="false"
       >
         {/* Empty / loading state */}
-        {messages.length === 0 && !isTyping && (
+        {messages.length === 0 && !isTyping && !reconnecting && (
           <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
             <div className="w-12 h-12 rounded-full bg-indigo-100 flex items-center justify-center">
               <Sparkles className="h-5 w-5 text-indigo-500" />
             </div>
             <p className="text-sm font-medium text-slate-500">Starting conversation…</p>
+          </div>
+        )}
+
+        {/* Reconnecting state — the first connection attempt failed/hung;
+            an automatic retry is in flight. Visible feedback instead of
+            leaving the visitor staring at nothing for several seconds. */}
+        {messages.length === 0 && reconnecting && (
+          <div className="flex flex-col items-center justify-center h-full gap-3 px-6 text-center">
+            <div className="w-12 h-12 rounded-full bg-amber-100 flex items-center justify-center animate-pulse">
+              <Sparkles className="h-5 w-5 text-amber-500" />
+            </div>
+            <p className="text-sm font-medium text-slate-500">Reconnecting…</p>
           </div>
         )}
 
@@ -175,9 +187,10 @@ export function ChatWindow({ state, onSend, onMinimize, onClose, onReset }: Prop
           </AnimatePresence>
         </div>
 
-        {/* Typing indicator */}
+        {/* Typing indicator — suppressed while the reconnecting state above
+            is showing its own message, so the two don't render together. */}
         <AnimatePresence>
-          {isTyping && <TypingIndicator />}
+          {isTyping && !reconnecting && <TypingIndicator />}
         </AnimatePresence>
 
         {/* Completion state — only the generic "wrapped up" banner; a

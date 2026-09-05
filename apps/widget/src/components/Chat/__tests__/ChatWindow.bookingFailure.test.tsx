@@ -32,6 +32,7 @@ function baseState(overrides: Partial<ChatState> = {}): ChatState {
     bookingState: { phase: 'idle', availableSlots: [] },
     loading: false,
     error: null,
+    reconnecting: false,
     ...overrides,
   };
 }

@@ -58,6 +58,34 @@ function delay(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
 }
 
+/**
+ * Races a promise against a timer. Does NOT cancel the underlying request
+ * (axios has no signal wired in here) — if the original promise resolves
+ * late, its result is simply ignored. That's the correct tradeoff for a
+ * stalled connection: waiting indefinitely is worse than occasionally
+ * having two requests briefly in flight.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('TIMEOUT')), ms);
+    promise.then(
+      v => { clearTimeout(timer); resolve(v); },
+      e => { clearTimeout(timer); reject(e); },
+    );
+  });
+}
+
+// Session creation is normally sub-second (confirmed against live logs) —
+// a few seconds is generous, not a real request budget. Investigated stall:
+// the OPTIONS preflight for POST /:token/session succeeds instantly, but the
+// POST itself sometimes never reaches the server at all (confirmed via
+// server request logs — no "request started" entry appears for it), most
+// consistent with a stale/dropped keep-alive connection being reused after
+// an idle gap. A retry issues a fresh request rather than continuing to
+// wait on the same one.
+const SESSION_CREATE_TIMEOUT_MS     = 6_000;
+const SESSION_CREATE_RETRY_DELAY_MS = 1_000;
+
 const INITIAL_STATE: ChatState = {
   messages: [],
   widgetSessionId: null,
@@ -67,6 +95,7 @@ const INITIAL_STATE: ChatState = {
   bookingState: { phase: 'idle', availableSlots: [] },
   loading: false,
   error: null,
+  reconnecting: false,
 };
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -97,10 +126,42 @@ export function useConversation() {
 
     await delay(TYPING_DELAY_MS);
 
-    try {
-      const session = await widgetApiClient.createSession();
-      const { widgetSessionId } = session;
+    // ── Session creation, with one automatic retry ──────────────────────────
+    // First attempt uses a short budget rather than the client's default
+    // 10s — a hung/stalled connection should surface (and recover) quickly,
+    // not silently eat most of a visitor's patience before anything happens.
+    let session: { widgetSessionId: string } | null = null;
 
+    try {
+      session = await withTimeout(widgetApiClient.createSession(), SESSION_CREATE_TIMEOUT_MS);
+    } catch {
+      // Visible feedback instead of silence — see SESSION_CREATE_TIMEOUT_MS's
+      // comment above for what this is recovering from.
+      setState(s => ({ ...s, reconnecting: true }));
+      await delay(SESSION_CREATE_RETRY_DELAY_MS);
+
+      try {
+        session = await withTimeout(widgetApiClient.createSession(), SESSION_CREATE_TIMEOUT_MS);
+      } catch {
+        session = null;
+      }
+
+      setState(s => ({ ...s, reconnecting: false }));
+    }
+
+    if (!session) {
+      // Both attempts failed — same honest fallback as before, no
+      // widgetSessionId means no real conversation is possible yet.
+      setState(s => ({
+        ...s,
+        isTyping: false,
+        messages: [makeAiMessage("Hi! How can I help you today? I'm here to answer your questions and schedule service.")],
+      }));
+      return;
+    }
+
+    try {
+      const { widgetSessionId } = session;
       setState(s => ({ ...s, widgetSessionId }));
 
       const response = await widgetApiClient.chat({
@@ -117,8 +178,8 @@ export function useConversation() {
         messages: [makeAiMessage(response.reply)],
       }));
     } catch {
-      // Fallback greeting if the backend is unreachable (session creation
-      // or the init chat call both land here)
+      // Fallback greeting if the init chat call fails after a real session
+      // was created.
       setState(s => ({
         ...s,
         isTyping: false,
