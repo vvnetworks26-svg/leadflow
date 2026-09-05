@@ -131,9 +131,11 @@ async function walkBlueprint() {
     } as any);
 
     // The exact predicate from orchestrator.ts step 13.
+    const isBookingObjective = (objective: string | null) =>
+      objective === 'offer_appointment' || objective === 'confirm_appointment';
     const bookingTriggered =
-      result.updatedObjective === 'offer_appointment' &&
-      previousObjective !== 'offer_appointment';
+      isBookingObjective(result.updatedObjective) &&
+      !isBookingObjective(previousObjective);
 
     turns.push({
       answered,
@@ -195,6 +197,55 @@ describe('HVAC blueprint flow on the rule-based fallback path', () => {
 
     // Regression guard for the reported bug: it must fire at all.
     assert.ok(firedIndex >= 0, 'bookingTriggered never fired — SlotPicker would never render');
+  });
+
+  it('(a2) still fires when a single turn skips straight past offer_appointment into confirm_appointment', async () => {
+    // objective-selector.ts's selectObjective() walks the blueprint stage list
+    // in one pass per turn — if a free-text message supplies enough info to
+    // satisfy BOTH the collect_address and offer_appointment stages' criteria
+    // at once (address given AND a time stated, e.g. "123 Main St, tomorrow
+    // at 7pm works"), the resolved objective can jump directly from
+    // collect_address's objective to confirm_appointment, with
+    // offer_appointment never appearing as a recorded updatedObjective on any
+    // turn. The false-confirmation incident this guards against is consistent
+    // with exactly this path. Before the fix, bookingTriggered only checked
+    // for 'offer_appointment' and would never have fired here.
+    const identity = makeIdentity();
+    const rich     = memoryToRich(emptyMemory());
+
+    const beforeAddress = { ...rich.progress, visitorNameCollected: true, serviceCollected: true, emergencyCollected: true, phoneCollected: true } as any;
+    const afterBoth      = { ...beforeAddress, addressCollected: true, appointmentCollected: true } as any;
+
+    const turn1 = await ConversationOrchestrationService.orchestrate({
+      organizationId: 'org-fallback-test', conversationId: 'conv-2',
+      identity, intent: makeIntent(), memory: { ...rich, progress: beforeAddress },
+      progress: beforeAddress, history: [{ role: 'user', content: 'phone' }],
+      turnCount: 0, currentObjective: null, workflowState: null, currentBlueprintId: null,
+    } as any);
+
+    const turn2 = await ConversationOrchestrationService.orchestrate({
+      organizationId: 'org-fallback-test', conversationId: 'conv-2',
+      identity, intent: makeIntent(), memory: { ...rich, progress: afterBoth },
+      progress: afterBoth, history: [{ role: 'user', content: '123 Main St, tomorrow at 7pm works' }],
+      turnCount: 1, currentObjective: turn1.updatedObjective, workflowState: turn1.updatedWorkflowState,
+      currentBlueprintId: turn1.blueprintId,
+    } as any);
+
+    // Confirms the skip actually happened — offer_appointment was never the
+    // recorded objective, turn2 landed straight on confirm_appointment.
+    assert.notEqual(turn1.updatedObjective, 'offer_appointment',
+      `test setup invalid — expected turn1 to still be pre-appointment, got ${turn1.updatedObjective}`);
+    assert.equal(turn2.updatedObjective, 'confirm_appointment',
+      `expected the single-turn skip into confirm_appointment, got ${turn2.updatedObjective}`);
+
+    const isBookingObjective = (objective: string | null) =>
+      objective === 'offer_appointment' || objective === 'confirm_appointment';
+    const bookingTriggered =
+      isBookingObjective(turn2.updatedObjective) &&
+      !isBookingObjective(turn1.updatedObjective);
+
+    assert.equal(bookingTriggered, true,
+      'bookingTriggered must fire even when offer_appointment is skipped in one turn — otherwise the SlotPicker never renders and the model reaches confirm_appointment unguarded');
   });
 
   it('(c) returns stage-appropriate fallback text at every blueprint stage, never the old generic greeting', async () => {

@@ -126,11 +126,12 @@ export function personalizeGreeting(
  * Based on the active objective and available memory.
  */
 export function buildMustMention(params: {
-  objective:    string;
-  visitorName?: string;
-  service?:     string;
-  businessName: string;
-  isEmergency:  boolean;
+  objective:     string;
+  visitorName?:  string;
+  service?:      string;
+  businessName:  string;
+  isEmergency:   boolean;
+  bookingStatus?:'none' | 'requested' | 'booked';
 }): string[] {
   const items: string[] = [];
 
@@ -138,9 +139,23 @@ export function buildMustMention(params: {
   if (params.isEmergency)  items.push('Acknowledge the urgency immediately');
   if (params.service)      items.push(`Reference the service: ${params.service}`);
 
+  // 'Confirm the booking' / 'Confirm the appointment details clearly' used to
+  // be unconditional here — a direct instruction to claim success, issued
+  // regardless of whether widgetBook() had actually run. That directly
+  // contradicted the universal guardrail 'Never fabricate appointment
+  // confirmations' (prompt-assembly/GuardrailSerializer.ts) with a more
+  // specific, later instruction the model followed instead. Gated on the
+  // same bookingStatus === 'booked' signal used everywhere else this is
+  // checked (ToolGuards.ts, CTAEngine.ts, completion-evaluator.ts).
+  const isBooked = params.bookingStatus === 'booked';
+
   const objectiveMentions: Record<string, string[]> = {
-    offer_appointment:   ['Mention available appointment times', 'Confirm the booking'],
-    confirm_appointment: ['Confirm the appointment details clearly', 'Include confirmation steps'],
+    offer_appointment:   isBooked
+      ? ['Mention available appointment times', 'Confirm the booking']
+      : ['Mention available appointment times', 'Do NOT say the appointment is booked or confirmed yet — no time has been selected'],
+    confirm_appointment: isBooked
+      ? ['Confirm the appointment details clearly', 'Include confirmation steps']
+      : ['Say you are pulling up real scheduling options', 'Do NOT say the appointment is booked, confirmed, or scheduled — nothing has been booked yet'],
     complete_conversation:['Thank the customer', `Mention ${params.businessName} will follow up`],
     escalate_to_human:   ['Assure the customer a human will assist shortly'],
     resolve_objection:   ['Acknowledge the concern before reframing'],

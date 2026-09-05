@@ -86,12 +86,24 @@ export function buildGuardrails(params: {
 // ─── Response examples builder ────────────────────────────────────────────────
 
 export function buildExamples(params: {
-  objective:    ConversationObjective;
-  visitorName?: string;
-  service?:     string;
+  objective:     ConversationObjective;
+  visitorName?:  string;
+  service?:      string;
+  bookingStatus?:'none' | 'requested' | 'booked';
 }): string[] {
   const name = params.visitorName ? `, ${params.visitorName}` : '';
   const svc  = params.service ?? 'your service';
+
+  // A real Lead+Appointment only ever exists once widgetBook() has run
+  // (memory.bookingStatus is set to 'booked' nowhere else — see
+  // controllers/widgetController.ts). Gemini has no way to know whether that
+  // happened on its own — it only sees this objective and produces confident
+  // "you're booked" language regardless, which is exactly the false-
+  // confirmation bug this guards against. Below 'booked', the example must
+  // push toward the real booking flow (which sets bookingTriggered — see
+  // ai/orchestrator.ts step 13 — and renders the widget's SlotPicker) instead
+  // of claiming a booking that doesn't exist yet.
+  const isBooked = params.bookingStatus === 'booked';
 
   const EXAMPLES: Partial<Record<ConversationObjective, string[]>> = {
     collect_phone:        [`"What's the best number to reach you${name}?"`],
@@ -99,7 +111,9 @@ export function buildExamples(params: {
     collect_address:      ['"What\'s the service address?"'],
     handle_emergency:     [`"I understand this is urgent${name}. Let me get you scheduled right away — can I get your address?"`],
     offer_appointment:    ['"Great — let me check our availability. Do mornings or afternoons work better for you?"'],
-    confirm_appointment:  [`"Perfect${name}! You\'re all booked for ${svc}. You\'ll receive a confirmation shortly."`],
+    confirm_appointment:  isBooked
+      ? [`"Perfect${name}! You\'re all booked for ${svc}. You\'ll receive a confirmation shortly."`]
+      : [`"Let's get that locked in${name} — pulling up our real scheduling options now so you can pick a time that works."`],
     resolve_objection:    ['"That\'s completely understandable — many customers feel the same way. Here\'s what makes us different..."'],
     complete_conversation:[`"We\'re all set${name}! Someone will be in touch shortly."`],
     escalate_to_human:   ['"Let me connect you with someone from our team right away."'],

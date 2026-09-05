@@ -107,6 +107,7 @@ export const ResponseEngine = {
       service:      personalization.service ?? intent.detectedService ?? undefined,
       businessName: identity.companyProfile.businessName,
       isEmergency:  intent.urgency === 'critical' || intent.urgency === 'emergency',
+      bookingStatus:memory.bookingStatus,
     });
 
     const mustAvoid = buildMustAvoid({
@@ -128,8 +129,9 @@ export const ResponseEngine = {
     // ── 10. Examples ──────────────────────────────────────────────────────
     const examples = buildExamples({
       objective,
-      visitorName: personalization.visitorName,
-      service:     personalization.service,
+      visitorName:  personalization.visitorName,
+      service:      personalization.service,
+      bookingStatus:memory.bookingStatus,
     });
 
     // ── 11. Assemble ──────────────────────────────────────────────────────
