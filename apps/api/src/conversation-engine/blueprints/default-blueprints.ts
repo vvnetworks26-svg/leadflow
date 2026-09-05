@@ -115,7 +115,17 @@ export const HVAC_BOOKING_BLUEPRINT: ConversationBlueprint = {
     { id: 'greet',           objective: 'build_rapport',           requiredFields: [],         optionalFields: [], completionCriteria: ['visitorNameCollected'], allowedTools: [],                    transitions: [{ condition: 'visitorNameCollected', targetId: 'collect_service', priority: 1 }],               recoveryStrategy: STD_RECOVERY, skipWhen: ['visitorNameCollected'], exitConditions: [] },
     { id: 'collect_service', objective: 'collect_service_details', requiredFields: ['service'], optionalFields: [], completionCriteria: ['serviceCollected'],    allowedTools: [],                    transitions: [{ condition: 'serviceCollected', targetId: 'collect_phone', priority: 1 }],                    recoveryStrategy: STD_RECOVERY, skipWhen: ['serviceCollected'], exitConditions: [] },
     { id: 'collect_phone',   objective: 'collect_phone',           requiredFields: ['phone'],   optionalFields: [], completionCriteria: ['phoneCollected'],      allowedTools: ['create_lead'],       transitions: [{ condition: 'phoneCollected', targetId: 'offer_appointment', priority: 1 }],                  recoveryStrategy: STD_RECOVERY, skipWhen: ['phoneCollected'], exitConditions: [] },
-    { id: 'offer_appointment',objective: 'offer_appointment',      requiredFields: [],          optionalFields: [], completionCriteria: ['appointmentCollected'],allowedTools: ['check_availability','book_appointment'], transitions: [{ condition: 'appointmentCollected', targetId: 'done', priority: 1 }], recoveryStrategy: STD_RECOVERY, skipWhen: [], exitConditions: [] },
+    { id: 'offer_appointment',objective: 'offer_appointment',      requiredFields: [],          optionalFields: [], completionCriteria: ['appointmentCollected'],allowedTools: ['check_availability','book_appointment'], transitions: [{ condition: 'appointmentCollected', targetId: 'confirm', priority: 1 }], recoveryStrategy: STD_RECOVERY, skipWhen: [], exitConditions: [] },
+    // Was missing entirely — offer_appointment transitioned straight to
+    // 'done' (objective: complete_conversation) on appointmentCollected
+    // alone, with no booking_confirmed gate at all. appointmentCollected
+    // flips true from a free-text time preference ("tomorrow at 7pm works"),
+    // not a real booking — every other blueprint's final booking stage
+    // (hvac.repair's 'confirm', hvac.emergency's 'emergency_book',
+    // plumbing.emergency's 'book') correctly requires booking_confirmed
+    // (memory.bookingStatus === 'booked', set only by a real POST /book —
+    // see widgetController.ts) before advancing. Mirrors that pattern.
+    { id: 'confirm',         objective: 'confirm_appointment',     requiredFields: [],          optionalFields: [], completionCriteria: ['booking_confirmed'],   allowedTools: ['book_appointment','send_sms'],           transitions: [{ condition: 'booking_confirmed', targetId: 'done', priority: 1 }],       recoveryStrategy: STD_RECOVERY, skipWhen: [], exitConditions: [] },
     { id: 'done',            objective: 'complete_conversation',   requiredFields: [],          optionalFields: [], completionCriteria: [],                      allowedTools: [],                    transitions: [],                                                                                              recoveryStrategy: STD_RECOVERY, skipWhen: [], exitConditions: [] },
   ],
 };

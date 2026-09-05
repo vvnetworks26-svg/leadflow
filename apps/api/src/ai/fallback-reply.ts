@@ -71,7 +71,16 @@ export function buildFallbackReply(
       return `Perfect${name} — I have everything I need to get this booked. Let me confirm those details and lock in your appointment.`;
 
     case 'done':
-      return `You're all set${name}! Your appointment is confirmed and ${company} will follow up shortly with the details. Anything else I can help with?`;
+      // 'done' is normally only reachable once the blueprint's booking stage
+      // has required booking_confirmed (memory.bookingStatus === 'booked') to
+      // advance — see default-blueprints.ts. But this fallback path runs
+      // whenever Gemini is unavailable and must not assume that invariant on
+      // its own: claiming "confirmed" here regardless of bookingStatus is the
+      // same false-confirmation bug this whole fix targets, just reached via
+      // the rule-based path instead of a Gemini reply.
+      return memory.bookingStatus === 'booked'
+        ? `You're all set${name}! Your appointment is confirmed and ${company} will follow up shortly with the details. Anything else I can help with?`
+        : `Thanks${name} — ${company} will follow up shortly to lock in your appointment time.`;
 
     default:
       // No blueprint stage resolved (identity/blueprint unavailable), or a stage

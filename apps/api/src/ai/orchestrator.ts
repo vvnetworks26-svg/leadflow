@@ -300,7 +300,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   }
 
   // ── 11. Guardrail: output check ──────────────────────────────────────────
-  const outputGuard = checkOutput(reply);
+  const outputGuard = checkOutput(reply, updatedMemory.bookingStatus);
   reply = outputGuard.sanitized;
   if (!outputGuard.safe) {
     analyticsEvents.push(makeEvent('guardrail_blocked', organizationId, conversationId, {
@@ -339,10 +339,33 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   // stage is named differently per blueprint ('offer_appointment' in hvac.repair /
   // hvac.booking, 'emergency_book' in hvac.emergency) while all of them share the
   // 'offer_appointment' objective — see conversation-engine/blueprints/default-blueprints.ts.
-  const previousObjective = input.currentObjective ?? null;
-  const bookingTriggered  =
-    updatedObjective === 'offer_appointment' &&
-    previousObjective !== 'offer_appointment';
+  //
+  // Also fires on entry into 'confirm_appointment', not just 'offer_appointment'.
+  // objective-selector.ts's selectObjective() walks the blueprint's stage list in
+  // one pass and can skip straight past 'offer_appointment' into 'confirm' within a
+  // SINGLE turn whenever a free-text message supplies enough info to satisfy both
+  // stages' completion criteria at once (e.g. address + a stated time together) —
+  // in that case 'offer_appointment' is never the *recorded* updatedObjective on any
+  // turn, so the old single-objective check would never fire and the SlotPicker
+  // would never render, even though the model is now at the objective whose prompt
+  // guidance talks about finalizing a booking. Confirmed reproducible against the
+  // real Layer 3 engine (see fallback-blueprint-flow.test.ts's multi-hop case).
+  //
+  // This is deliberately just the render trigger, not a confirmation of anything —
+  // it only tells the frontend "open the real SlotPicker flow now". Whether the
+  // booking actually completes still depends entirely on a real POST /book call
+  // (widgetBook() in controllers/widgetController.ts), which is the only place
+  // memory.bookingStatus is ever set to 'booked'. The prompt guidance for both
+  // objectives (ResponsePlanner.buildExamples / Humanizer.buildMustMention) is now
+  // itself gated on that same field, so the model no longer claims success here —
+  // this just makes sure that whenever it reaches for that claim, the frontend has
+  // already been told to open the real flow instead.
+  const previousObjective  = input.currentObjective ?? null;
+  const isBookingObjective = (objective: string | null): boolean =>
+    objective === 'offer_appointment' || objective === 'confirm_appointment';
+  const bookingTriggered   =
+    isBookingObjective(updatedObjective) &&
+    !isBookingObjective(previousObjective);
 
   if (bookingTriggered) {
     if (updatedMemory.bookingStatus === 'none') {

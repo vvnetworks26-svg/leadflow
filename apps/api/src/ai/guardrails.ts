@@ -44,6 +44,65 @@ const NEVER_CLAIM_PATTERNS = [
   /not\s+an?\s+ai/i,
 ];
 
+// ─── Fake booking confirmation patterns ────────────────────────────────────────
+//
+// Defence in depth for the false-confirmation bug: Gemini has no way to know
+// whether a booking was actually persisted (memory.bookingStatus is set to
+// 'booked' nowhere except a successful POST /book — see widgetController.ts),
+// yet nothing stopped it from generating confident "you're booked" language at
+// the confirm_appointment/offer_appointment objectives. The prompt no longer
+// instructs it to (ResponsePlanner.buildExamples / Humanizer.buildMustMention
+// are now gated on bookingStatus === 'booked'), but models don't perfectly
+// follow instructions — this is the backstop, not the primary fix.
+//
+// Split into two tiers, learned from testing this against a real fallback-
+// template variant ("You're all set! Your appointment is confirmed and
+// {company} will follow up shortly") that doesn't restate a time at all:
+//
+// STRONG patterns have no legitimate non-booking reading — "your appointment
+// is confirmed" always means a booking exists — so they fire on their own.
+//
+// WEAK patterns (just "you're all set") are also common, harmless wrap-up
+// language with no booking involved at all, so they only count alongside a
+// concrete time/day reference — mirroring the real incident ("You are all
+// set, Siri! I have booked your AC service appointment for tomorrow at
+// 7:00 PM", which also matches a STRONG pattern on "I have booked" anyway).
+const STRONG_BOOKING_CONFIRMATION_PATTERNS = [
+  /i(?:'ve| have)\s+(?:booked|scheduled|confirmed)\b/i,
+  /(?:your|the)\s+appointment\s+(?:is|has been)\s+(?:booked|confirmed|scheduled)/i,
+  /booking\s+(?:is|has been)\s+confirmed/i,
+  /you(?:'re| are)\s+(?:booked|confirmed)\s+for/i,
+];
+
+const WEAK_BOOKING_CONFIRMATION_PATTERNS = [
+  /you(?:'re| are)\s+all\s+(?:set|booked)/i,
+];
+
+const TIME_OR_DAY_REFERENCE_PATTERNS = [
+  /\b(?:mon|tues?|wednes|thurs?|fri|satur|sun)day\b/i,
+  /\btomorrow\b/i,
+  /\btoday\b/i,
+  /\b\d{1,2}(?::\d{2})?\s*(?:am|pm)\b/i,
+];
+
+/**
+ * True when a reply reads like it's confirming a real, completed booking
+ * (confirmation phrasing + a named time/day) while no booking was actually
+ * persisted for this session (bookingStatus !== 'booked').
+ */
+function looksLikeFakeBookingConfirmation(
+  reply:         string,
+  bookingStatus: 'none' | 'requested' | 'booked',
+): boolean {
+  if (bookingStatus === 'booked') return false; // a real booking exists — confirming it is correct
+  if (STRONG_BOOKING_CONFIRMATION_PATTERNS.some(p => p.test(reply))) return true;
+  if (!WEAK_BOOKING_CONFIRMATION_PATTERNS.some(p => p.test(reply))) return false;
+  return TIME_OR_DAY_REFERENCE_PATTERNS.some(p => p.test(reply));
+}
+
+const FAKE_BOOKING_FALLBACK_REPLY =
+  "Let's get that locked in properly — let me pull up our real-time availability so you can pick a time that works.";
+
 // ─── Known valid integrations (to prevent hallucination) ─────────────────────
 
 const VALID_INTEGRATIONS = new Set([
@@ -87,7 +146,10 @@ export function checkInput(userMessage: string): GuardrailResult {
  * Check AI output AFTER generation.
  * Strips or replaces problematic content.
  */
-export function checkOutput(aiReply: string): GuardrailResult & { sanitized: string } {
+export function checkOutput(
+  aiReply:       string,
+  bookingStatus: 'none' | 'requested' | 'booked' = 'none',
+): GuardrailResult & { sanitized: string } {
   let sanitized = aiReply;
 
   // Never claim to be human
@@ -124,6 +186,14 @@ export function checkOutput(aiReply: string): GuardrailResult & { sanitized: str
   // guardrail_blocked analytics event while leaving the text untouched.
   const isTruncated = looksTruncated(sanitized);
 
+  // Defence in depth: a reply that sounds like it's confirming a real booking
+  // when no booking was actually persisted for this session. Unlike the other
+  // checks here, this one REWRITES the reply rather than just flagging it —
+  // sending the fabricated claim to the visitor is the harm itself, so
+  // passing it through untouched (the way looksTruncated() does) would defeat
+  // the point of catching it at all.
+  const isFakeBookingConfirmation = looksLikeFakeBookingConfirmation(sanitized, bookingStatus);
+
   if (hasSuspiciousPrice) {
     sanitized = sanitized.replace(
       /\$[\d,]+(?:\.\d{2})?\s*(?:per|\/)\s*(?:month|year|user|seat)/gi,
@@ -131,12 +201,17 @@ export function checkOutput(aiReply: string): GuardrailResult & { sanitized: str
     );
   }
 
+  if (isFakeBookingConfirmation) {
+    sanitized = FAKE_BOOKING_FALLBACK_REPLY;
+  }
+
   return {
     passed:    true,
-    safe:      !hasSuspiciousPrice && !hasAdviceClaim && !isTruncated,
+    safe:      !hasSuspiciousPrice && !hasAdviceClaim && !isTruncated && !isFakeBookingConfirmation,
     sanitized,
-    reason:    hasSuspiciousPrice ? 'Pricing sanitized'
-             : isTruncated        ? 'Reply appears truncated'
+    reason:    isFakeBookingConfirmation ? 'Blocked fabricated booking confirmation'
+             : hasSuspiciousPrice        ? 'Pricing sanitized'
+             : isTruncated               ? 'Reply appears truncated'
              : undefined,
   };
 }
