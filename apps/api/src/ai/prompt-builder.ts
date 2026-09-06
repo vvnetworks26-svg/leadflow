@@ -16,7 +16,7 @@
  */
 
 import type { ConversationStage, ConversationMemory, QualificationScore, Recommendation, ConversationPlan } from './types';
-import { STAGE_INSTRUCTIONS } from './conversation-state';
+import { getStageInstructions } from './conversation-state';
 import { memoryToPromptBlock } from './memory';
 import { formatKnowledgeForPrompt } from './knowledge';
 import { formatRecommendationsForPrompt } from './recommendation';
@@ -94,8 +94,8 @@ function industryPrompt(industry: string): string {
   return `[INDUSTRY CONTEXT]\n${industryInsights.default}\n[/INDUSTRY CONTEXT]`;
 }
 
-function stagePrompt(stage: ConversationStage): string {
-  return `[CURRENT STAGE: ${stage.toUpperCase()}]\n${STAGE_INSTRUCTIONS[stage]}\n[/CURRENT STAGE]`;
+function stagePrompt(stage: ConversationStage, bookingStatus: ConversationMemory['bookingStatus']): string {
+  return `[CURRENT STAGE: ${stage.toUpperCase()}]\n${getStageInstructions(stage, bookingStatus)}\n[/CURRENT STAGE]`;
 }
 
 function qualificationPrompt(score: QualificationScore): string {
@@ -158,7 +158,7 @@ export function buildSystemPrompt(params: {
     coreSystemPrompt(org.aiTone),
     organizationPrompt(org),
     industryPrompt(org.industry),
-    stagePrompt(stage),
+    stagePrompt(stage, memory.bookingStatus),
     qualificationPrompt(score),
     memoryToPromptBlock(memory),
     formatRecommendationsForPrompt(recommendations),
