@@ -55,7 +55,7 @@ export const STAGE_INSTRUCTIONS: Record<ConversationStage, string> = {
     `You are in the OBJECTION HANDLING stage. Empathize with the visitor's concern, validate it, then reframe the value. Never be pushy. Offer a low-commitment next step.`,
 
   booking:
-    `You are in the BOOKING stage. The visitor is ready to schedule. Guide them to confirm the appointment. Be warm and efficient.`,
+    `You are in the BOOKING stage. The visitor is ready to schedule, but no appointment has been booked yet. Guide them toward picking a real time slot. Do NOT say the appointment is booked or confirmed — nothing has been booked yet. Be warm and efficient.`,
 
   completed:
     `You are in the COMPLETED stage. The goal has been achieved. Thank the visitor warmly, confirm next steps clearly, and close the conversation.`,
@@ -63,6 +63,29 @@ export const STAGE_INSTRUCTIONS: Record<ConversationStage, string> = {
   escalated:
     `You are in the ESCALATED stage. A human needs to take over. Apologize for any confusion, confirm the visitor's contact details, and assure them someone will follow up promptly.`,
 };
+
+/**
+ * Returns the stage instructions to inject into the prompt.
+ *
+ * STAGE_INSTRUCTIONS['booking'] used to unconditionally say "Guide them to
+ * confirm the appointment" — a direct instruction to claim success regardless
+ * of whether widgetBook() had actually run. This is the legacy path's
+ * equivalent of the same gap fixed in ResponsePlanner.buildExamples() and
+ * Humanizer.buildMustMention() (see PR #28): gated on the same
+ * bookingStatus === 'booked' signal used everywhere else this is checked.
+ */
+export function getStageInstructions(
+  stage: ConversationStage,
+  bookingStatus?: ConversationMemory['bookingStatus'],
+): string {
+  const isBooked = bookingStatus === 'booked';
+
+  if (stage === 'booking' && isBooked) {
+    return `You are in the BOOKING stage. The appointment has been booked. Confirm the appointment details clearly and let the visitor know next steps. Be warm and efficient.`;
+  }
+
+  return STAGE_INSTRUCTIONS[stage];
+}
 
 // ─── Escalation signals ───────────────────────────────────────────────────────
 
