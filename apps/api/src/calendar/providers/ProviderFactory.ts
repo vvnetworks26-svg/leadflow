@@ -47,13 +47,16 @@ export async function getProviderForUser(
   }
 }
 
-export async function getProviderForConnection(connectionId: string): Promise<ICalendarProvider> {
+export async function getProviderForConnection(
+  organizationId: string,
+  connectionId:   string,
+): Promise<ICalendarProvider> {
   const conn = await CalendarConnectionModel
-    .findById(connectionId)
+    .findOne({ _id: connectionId, organizationId })
     .select('+accessToken +refreshToken')
     .lean();
 
-  if (!conn) return new ManualProvider('', '');
+  if (!conn) return new ManualProvider(organizationId, '');
 
   switch (conn.provider) {
     case 'google':

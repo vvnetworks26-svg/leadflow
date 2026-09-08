@@ -57,14 +57,24 @@ export const ThemeService = {
     return docs.map(d => d.toJSON() as unknown as IWidgetTheme);
   },
 
-  async getById(id: string): Promise<IWidgetTheme> {
-    const doc = await WidgetThemeModel.findById(id);
+  // Scoped to system themes (visible/usable by every org) OR the caller's
+  // own — same $or shape as listAll() above. A bare findById() here let any
+  // authenticated org read or apply another org's private custom theme by
+  // guessing/knowing its id.
+  async getById(organizationId: string, id: string): Promise<IWidgetTheme> {
+    const doc = await WidgetThemeModel.findOne({
+      _id: id,
+      $or: [{ isSystem: true }, { organizationId }],
+    });
     if (!doc) throw new ApiError(404, 'Theme not found', 'THEME_NOT_FOUND');
     return doc.toJSON() as unknown as IWidgetTheme;
   },
 
   async duplicate(themeId: string, organizationId: string, name: string): Promise<IWidgetTheme> {
-    const source = await WidgetThemeModel.findById(themeId);
+    const source = await WidgetThemeModel.findOne({
+      _id: themeId,
+      $or: [{ isSystem: true }, { organizationId }],
+    });
     if (!source) throw new ApiError(404, 'Theme not found', 'THEME_NOT_FOUND');
     const doc = await WidgetThemeModel.create({
       organizationId,
