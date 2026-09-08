@@ -11,6 +11,57 @@ import type { DetectedIntent, IntentType } from './types';
 // ─── Keyword maps ─────────────────────────────────────────────────────────────
 
 const INTENT_KEYWORDS: Record<IntentType, string[]> = {
+  // ── HVAC-domain categories ──────────────────────────────────────────────
+  // Declared first so a tied score (a message hitting both an HVAC keyword
+  // and a generic one, e.g. "fix") resolves to the more specific signal —
+  // scoreIntent()'s tie-break follows INTENT_KEYWORDS's own key order.
+  //
+  // Root cause this closes: the classifier below was built for LeadFlow's
+  // own SaaS-sales chatbot context (pricing/demo/website/API) and has zero
+  // HVAC-domain vocabulary, so a customer describing their actual problem
+  // ("my AC stopped cooling") always fell through to 'Unknown' ->
+  // intentCategory 'unknown' -> loadBlueprint() finds no match -> Layer 3
+  // never engages. Measured: 76% of all production sessions (67% of
+  // cascade-comfort-hvac's own) never resolved a blueprint. Validated this
+  // fix against 25 realistic messages (see ai/__tests__/intent.hvacCategories.test.ts)
+  // before landing it here.
+  Repair: [
+    'air conditioner', 'air conditioning', 'ac unit', 'a/c unit', 'ac is', 'my ac', 'the ac',
+    'furnace', 'heater', 'heating system', 'hvac system', 'hvac unit', 'thermostat',
+    'duct', 'ductwork', 'compressor', 'condenser', 'blower', 'coil',
+    'not cooling', 'not heating', 'not blowing cold', 'not blowing hot',
+    'no cold air', 'no hot air', 'not turning on', "won't turn on", "won't start",
+    'stopped working', 'stopped cooling', 'stopped heating',
+    'making a noise', 'strange noise', 'weird noise', 'loud noise', 'banging noise', 'rattling',
+    'leaking', 'water leak', 'leak from', 'dripping water',
+    'keeps shutting off', 'shutting off', 'tripping the breaker', 'keeps tripping',
+    'blowing warm air', 'blowing hot air', 'frozen', 'iced up', 'ice buildup',
+    'weird smell',
+    'need a repair', 'need repair', 'need it fixed', 'need a technician', 'send a technician',
+  ],
+  Emergency: [
+    'emergency', 'urgent', 'urgently', 'right away', 'immediately', 'asap',
+    'as soon as possible', 'no heat', 'no ac', 'no air conditioning', 'no cooling',
+    'completely stopped', 'totally broken', 'died', 'went out',
+    "can't wait", 'need someone now', 'need help now', 'need this fixed now',
+    'gas smell', 'smell gas', 'smell of gas', 'carbon monoxide', 'smoke', 'sparks', 'sparking', 'fire',
+    'burning', 'burning smell',
+    'flooding', 'water everywhere', 'water all over',
+    'freezing in here', 'extremely hot', 'extremely cold', 'heat wave',
+  ],
+  Maintenance: [
+    'maintenance', 'tune-up', 'tune up', 'tuneup', 'checkup', 'check-up',
+    'seasonal service', 'annual service', 'routine service', 'routine maintenance',
+    'preventive', 'preventative', 'filter change', 'filter replacement',
+    'clean my system', 'service my system', 'servicing',
+    'get ready for summer', 'get ready for winter', 'maintenance plan', 'service plan', 'inspection',
+  ],
+  Installation: [
+    'install', 'installation', 'new system', 'new unit', 'new ac', 'new furnace', 'new hvac',
+    'replace my system', 'replace my unit', 'replacement', 'system replacement',
+    'upgrade my system', 'upgrading', 'put in a new', 'quote for a new', 'estimate for a new',
+    'looking to install', 'want to install',
+  ],
   Greeting: [
     'hello', 'hi there', 'hey there', 'good morning', 'good afternoon', 'good evening',
     'howdy', 'greetings', 'what\'s up', 'howdy',

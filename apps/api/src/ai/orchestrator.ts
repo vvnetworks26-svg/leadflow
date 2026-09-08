@@ -454,8 +454,21 @@ function buildResolvedIntent(
  * Maps the legacy ai/types IntentType to the Layer 2 IntentCategory.
  * Needed to bridge the legacy classifier output to Layer 4/5 interfaces.
  */
-function mapToIntentCategory(intentType: string): import('../intent-engine/types').IntentCategory {
+export function mapToIntentCategory(intentType: string): import('../intent-engine/types').IntentCategory {
   const map: Record<string, import('../intent-engine/types').IntentCategory> = {
+    // HVAC-domain categories (ai/intent.ts's INTENT_KEYWORDS) -> the
+    // categories hvac.repair/hvac.emergency actually key on in
+    // conversation-engine/blueprints/default-blueprints.ts. Maintenance and
+    // Installation both route to 'repair' (hvac.repair), not
+    // 'book_appointment' (hvac.booking) — hvac.repair's flow collects an
+    // address before offering an appointment, which both maintenance
+    // visits and installation quotes need; hvac.booking's shorter flow
+    // never collects one, so it stays reserved for explicit "book"/
+    // "schedule" language.
+    Repair:       'repair',
+    Maintenance:  'repair',
+    Installation: 'repair',
+    Emergency:    'emergency_service',
     Booking:    'book_appointment',
     Demo:       'book_appointment',
     Pricing:    'request_estimate',

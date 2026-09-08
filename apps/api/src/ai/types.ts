@@ -33,6 +33,15 @@ export type IntentType =
   | 'Demo'
   | 'Objection'
   | 'Comparison'
+  // HVAC-domain categories — map to 'repair'/'emergency_service' in
+  // ai/orchestrator.ts's mapToIntentCategory() so loadBlueprint() can
+  // resolve hvac.repair/hvac.emergency from plain customer language,
+  // not just an explicit "book"/"schedule" ask. See ai/intent.ts's
+  // INTENT_KEYWORDS for the keyword sets.
+  | 'Repair'
+  | 'Emergency'
+  | 'Maintenance'
+  | 'Installation'
   | 'Unknown';
 
 export interface DetectedIntent {
