@@ -42,7 +42,7 @@ export const WidgetConfigService = {
 
   /** Apply a theme's colors/typography/etc. to the widget config. */
   async applyTheme(organizationId: string, themeId: string): Promise<IWidgetConfiguration> {
-    const theme = await ThemeService.getById(themeId);
+    const theme = await ThemeService.getById(organizationId, themeId);
     return WidgetConfigService.update(organizationId, {
       themeId,
       colors:       theme.colors as any,

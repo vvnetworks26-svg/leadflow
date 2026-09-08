@@ -130,17 +130,22 @@ export const CalendarConnectionService = {
 
   /** Reconnect / re-test an existing connection. */
   async reconnect(organizationId: string, id: string): Promise<ICalendarConnection> {
-    const provider = await getProviderForConnection(id);
+    // Confirms the connection actually belongs to this org before anything
+    // downstream touches it — throws 404 otherwise. Without this, a
+    // wrong-org id would still reach getProviderForConnection() below.
+    await CalendarConnectionService.getById(organizationId, id);
+
+    const provider = await getProviderForConnection(organizationId, id);
     try {
       await provider.refreshTokenIfNeeded();
       const connected = await provider.isConnected();
-      await CalendarConnectionModel.findByIdAndUpdate(id, {
+      await CalendarConnectionModel.findOneAndUpdate({ _id: id, organizationId }, {
         status:       connected ? 'connected' : 'error',
         errorMessage: connected ? null : 'Connection test failed',
         lastSyncAt:   new Date(),
       });
     } catch (err: any) {
-      await CalendarConnectionModel.findByIdAndUpdate(id, {
+      await CalendarConnectionModel.findOneAndUpdate({ _id: id, organizationId }, {
         status:       'error',
         errorMessage: err?.message ?? 'Unknown error',
       });
@@ -151,11 +156,15 @@ export const CalendarConnectionService = {
 
   /** Sync calendar list for a connection. */
   async syncCalendars(organizationId: string, id: string): Promise<string[]> {
-    const provider = await getProviderForConnection(id);
+    // Same ownership check as reconnect() above — 404 before touching
+    // anything downstream, rather than a scoped write that silently no-ops.
+    await CalendarConnectionService.getById(organizationId, id);
+
+    const provider = await getProviderForConnection(organizationId, id);
     const cals     = await provider.listCalendars();
     const calIds   = cals.map(c => c.id);
     const primary  = cals.find(c => c.primary)?.id ?? calIds[0] ?? '';
-    await CalendarConnectionModel.findByIdAndUpdate(id, {
+    await CalendarConnectionModel.findOneAndUpdate({ _id: id, organizationId }, {
       calendarIds:       calIds,
       primaryCalendarId: primary,
       lastSyncAt:        new Date(),
