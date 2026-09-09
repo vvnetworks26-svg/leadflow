@@ -103,6 +103,31 @@ function looksLikeFakeBookingConfirmation(
 const FAKE_BOOKING_FALLBACK_REPLY =
   "Let's get that locked in properly — let me pull up our real-time availability so you can pick a time that works.";
 
+// ─── Fake notification-claim patterns ──────────────────────────────────────
+//
+// Defence in depth: confirmed separately that zero real notifications
+// (SMS/email/WhatsApp) are ever sent by any code path reachable from live
+// chat or booking — the providers (Twilio/Resend/WhatsApp) are wired and
+// functional, but nothing in the widget/booking flow ever calls them (env
+// vars unset, no caller anywhere in the reachable path). Unlike the
+// booking-confirmation check above, this has no "safe" bookingStatus value
+// — even a genuinely real, just-completed booking never triggers a real
+// notification, so this check is unconditional and runs independently of
+// bookingStatus.
+const NOTIFICATION_CLAIM_PATTERNS = [
+  /you(?:'ll| will)\s+(?:receive|get)\s+an?\s+(?:confirmation|text|email|sms|call)\b/i,
+  /we(?:'ll| will)\s+(?:text|email|call|notify)\s+you\b/i,
+  /(?:i(?:'ve| have)|we(?:'ve| have))\s+(?:sent|texted|emailed)\s+you\b/i,
+  /(?:a\s+)?confirmation\s+(?:text|email|sms)\s+(?:has been|is being|will be)\s+sent/i,
+  /check\s+your\s+(?:email|inbox|phone|texts?)\s+for\s+(?:a\s+|the\s+)?confirmation/i,
+];
+
+function looksLikeFakeNotificationClaim(reply: string): boolean {
+  return NOTIFICATION_CLAIM_PATTERNS.some(p => p.test(reply));
+}
+
+const FAKE_NOTIFICATION_FALLBACK_REPLY = 'Is there anything else I can help with?';
+
 // ─── Known valid integrations (to prevent hallucination) ─────────────────────
 
 const VALID_INTEGRATIONS = new Set([
@@ -194,6 +219,12 @@ export function checkOutput(
   // the point of catching it at all.
   const isFakeBookingConfirmation = looksLikeFakeBookingConfirmation(sanitized, bookingStatus);
 
+  // Independent of bookingStatus — see comment above NOTIFICATION_CLAIM_PATTERNS.
+  // Checked even when isFakeBookingConfirmation is true so the reason/priority
+  // logic below is simple, but only applied if the booking check didn't
+  // already replace the whole reply.
+  const isFakeNotificationClaim = looksLikeFakeNotificationClaim(sanitized);
+
   if (hasSuspiciousPrice) {
     sanitized = sanitized.replace(
       /\$[\d,]+(?:\.\d{2})?\s*(?:per|\/)\s*(?:month|year|user|seat)/gi,
@@ -203,13 +234,16 @@ export function checkOutput(
 
   if (isFakeBookingConfirmation) {
     sanitized = FAKE_BOOKING_FALLBACK_REPLY;
+  } else if (isFakeNotificationClaim) {
+    sanitized = FAKE_NOTIFICATION_FALLBACK_REPLY;
   }
 
   return {
     passed:    true,
-    safe:      !hasSuspiciousPrice && !hasAdviceClaim && !isTruncated && !isFakeBookingConfirmation,
+    safe:      !hasSuspiciousPrice && !hasAdviceClaim && !isTruncated && !isFakeBookingConfirmation && !isFakeNotificationClaim,
     sanitized,
     reason:    isFakeBookingConfirmation ? 'Blocked fabricated booking confirmation'
+             : isFakeNotificationClaim   ? 'Blocked fabricated notification claim'
              : hasSuspiciousPrice        ? 'Pricing sanitized'
              : isTruncated               ? 'Reply appears truncated'
              : undefined,

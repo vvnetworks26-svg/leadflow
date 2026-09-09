@@ -22,7 +22,7 @@ const FIELD_QUESTIONS: Record<string, string[]> = {
     "What's the best number to reach you?",
     "What phone number can our technician call you on?",
     "What's a good number for you?",
-    "What number should we use to confirm your appointment?",
+    "What's the best number to have on file for you?",
   ],
   address: [
     "What's the service address?",
@@ -31,7 +31,7 @@ const FIELD_QUESTIONS: Record<string, string[]> = {
     "What's the address we'd be coming out to?",
   ],
   email: [
-    "What's the best email to send your confirmation to?",
+    "What's the best email to have on file for you?",
     "Can I get an email address for you?",
     "What email should we use?",
   ],
@@ -81,7 +81,7 @@ const ROBOTIC_MAP: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /please provide your phone number\.?/i,           replacement: "What's the best number to reach you on?" },
   { pattern: /please provide your address\.?/i,                replacement: "What's the service address?" },
   { pattern: /please provide your name\.?/i,                   replacement: "What's your name?" },
-  { pattern: /please provide your email(?: address)?\.?/i,     replacement: "What email should we send your confirmation to?" },
+  { pattern: /please provide your email(?: address)?\.?/i,     replacement: "What's the best email to have on file for you?" },
   { pattern: /what is your name\?/i,                           replacement: "What's your name?" },
   { pattern: /what is your phone number\?/i,                   replacement: "What's the best number to reach you?" },
   { pattern: /what is your address\?/i,                        replacement: "What's your address?" },

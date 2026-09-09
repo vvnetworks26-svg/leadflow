@@ -111,8 +111,13 @@ export function buildExamples(params: {
     collect_address:      ['"What\'s the service address?"'],
     handle_emergency:     [`"I understand this is urgent${name}. Let me get you scheduled right away — can I get your address?"`],
     offer_appointment:    ['"Great — let me check our availability. Do mornings or afternoons work better for you?"'],
+    // Even in the isBooked branch, this must not promise a confirmation
+    // text/email/call — nothing in this codebase ever sends one (Twilio/
+    // Resend/WhatsApp are wired but unreachable from the live chat/booking
+    // path; confirmed unset/unused). The booking itself is real; a
+    // follow-up notification about it is not, so the example can't claim one.
     confirm_appointment:  isBooked
-      ? [`"Perfect${name}! You\'re all booked for ${svc}. You\'ll receive a confirmation shortly."`]
+      ? [`"Perfect${name}! You\'re all booked for ${svc}."`]
       : [`"Let's get that locked in${name} — pulling up our real scheduling options now so you can pick a time that works."`],
     resolve_objection:    ['"That\'s completely understandable — many customers feel the same way. Here\'s what makes us different..."'],
     complete_conversation:[`"We\'re all set${name}! Someone will be in touch shortly."`],
