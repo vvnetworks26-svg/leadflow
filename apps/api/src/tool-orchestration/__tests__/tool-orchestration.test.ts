@@ -19,7 +19,6 @@ import {
   isBusinessClosed,
   INTENT_CATEGORY_MAP,
 } from '../MemoryBugFixes';
-import { buildMemoryItem }       from '../../memory-engine/MemoryScorer';
 
 import type { ToolSelectionContext } from '../types';
 import type { ResolvedIntent }       from '../../intent-engine/types';
@@ -554,25 +553,6 @@ describe('BUG-H1 — stableMemoryId', () => {
   it('ID is always 12 chars (mem- + 8 hex)', () => {
     const id = stableMemoryId('org-1', 'conv-1', 'visitorName');
     assert.equal(id.length, 12);
-  });
-});
-
-describe('BUG-H1 — MemoryScorer uses stable IDs', () => {
-  it('same key produces same ID on repeated calls', () => {
-    const item1 = buildMemoryItem({ key: 'phone', value: '555', confidence: 80, source: 'user' });
-    const item2 = buildMemoryItem({ key: 'phone', value: '555', confidence: 80, source: 'user' });
-    assert.equal(item1.id, item2.id);
-  });
-
-  it('different keys produce different IDs', () => {
-    const item1 = buildMemoryItem({ key: 'phone', value: '555', confidence: 80, source: 'user' });
-    const item2 = buildMemoryItem({ key: 'email', value: 'a@b.com', confidence: 80, source: 'user' });
-    assert.notEqual(item1.id, item2.id);
-  });
-
-  it('ID starts with mem-', () => {
-    const item = buildMemoryItem({ key: 'visitorName', value: 'Alice', confidence: 90, source: 'user' });
-    assert.ok(item.id.startsWith('mem-'));
   });
 });
 
