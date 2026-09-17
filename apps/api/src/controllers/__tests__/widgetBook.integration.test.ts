@@ -281,4 +281,44 @@ describe('POST /api/v1/widget/:token/book — enforcement', () => {
     assert.equal(countsAfterSecond.leads, 1);
     assert.equal(countsAfterSecond.appointments, 1);
   });
+
+  it('updates the Lead already auto-captured for this conversation instead of creating a second one (phone-collected → real /book)', async () => {
+    const slug = 'book-existing-lead';
+    const { orgId, widgetSessionId } = await seedOrgAndSession(slug);
+    await advanceToBookableStage(orgId, widgetSessionId, { visitorName: 'Jamie Rivera', phone: '555-030-1111' });
+
+    const session = await AIConversationSessionModel.findOne({ widgetSessionId, organizationId: orgId }).lean();
+    const conversationId = session!.conversationId;
+
+    // Simulates ai/orchestrator.ts's step 3b having already fired earlier in
+    // this same conversation, before booking ever completed.
+    const preCapturedLead = await LeadModel.create({
+      organizationId: orgId,
+      name:           'Unknown Caller',
+      phone:          '555-030-1111',
+      hvacNeed:       'General inquiry',
+      source:         'widget',
+      status:         'New',
+      conversationId,
+      notes:          'Lead captured automatically when a phone number was collected mid-conversation.',
+    });
+
+    const { status, body } = await postJson(
+      `/api/v1/widget/${slug}/book`,
+      bookingPayload({ widgetSessionId }),
+    );
+
+    assert.equal(status, 201);
+    assert.ok(body.data.appointmentId);
+
+    const counts = await countRecords(orgId);
+    assert.equal(counts.leads, 1, 'booking must UPDATE the pre-captured lead, not create a second one');
+    assert.equal(counts.appointments, 1);
+
+    const lead = await LeadModel.findOne({ organizationId: orgId }).lean();
+    assert.equal(String(lead!._id), String(preCapturedLead._id), 'the same Lead document must have been reused');
+    assert.equal(lead!.name, 'Jamie Rivera', 'real booking-time name must overwrite the placeholder');
+    assert.equal(lead!.hvacNeed, 'AC Repair', 'real booking-time service must overwrite the auto-capture default');
+    assert.ok(lead!.appointmentId, 'the reused lead must be back-linked to the new appointment');
+  });
 });

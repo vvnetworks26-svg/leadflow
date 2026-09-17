@@ -179,6 +179,10 @@ LeadSchema.index({ organizationId: 1, tags: 1 });
 LeadSchema.index({ organizationId: 1, source: 1 });
 LeadSchema.index({ organizationId: 1, email: 1 });
 LeadSchema.index({ organizationId: 1, phone: 1 });
+// Dedup key for phone-collected-lead capture (ai/orchestrator.ts) and
+// booking-time find-or-update (widgetBook() in widgetController.ts) — both
+// look a lead up by the session's stable conversationId before writing.
+LeadSchema.index({ organizationId: 1, conversationId: 1 });
 // Full-text search
 LeadSchema.index(
   { name: 'text', email: 'text', phone: 'text', company: 'text', notes: 'text', hvacNeed: 'text' },

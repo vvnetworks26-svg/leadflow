@@ -30,7 +30,7 @@ import type {
   DetectedIntent,
 } from './types';
 import { classifyIntent, hasBookingIntent }            from './intent';
-import { updateMemoryFromMessage }                     from './memory';
+import { updateMemoryFromMessage, memoryToRich }       from './memory';
 import { qualifyLead, shouldTriggerBooking }           from './qualification';
 import { generateRecommendations }                     from './recommendation';
 import { computeNextStage, STAGE_INSTRUCTIONS }        from './conversation-state';
@@ -51,6 +51,7 @@ import { ResponseEngine }                              from '../response-engine/
 import { PromptAssembler }                             from '../prompt-assembly/PromptAssembler';
 import { ConversationOrchestrationService }            from '../conversation-engine/ConversationOrchestrationService';
 import { logger }                                      from '../utils/logger';
+import { LeadService }                                 from '../services/LeadService';
 import type { ConversationPlan as LegacyConversationPlan, RichConversationMemory } from './types';
 import type {
   ConversationPlan as L3ConversationPlan,
@@ -126,6 +127,43 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
   if (intent.intent === 'Demo') {
     updatedMemory.demoRequested = true;
   }
+
+  // ── 3b. Phone-collected lead capture (fire-and-forget) ─────────────────────
+  // Every blueprint that has a phone-collection stage already declares
+  // 'create_lead' in that stage's allowedTools (collect_phone /
+  // emergency_triage / triage / capture_lead — verified across all of
+  // hvac.repair, hvac.booking, hvac.emergency, plumbing.emergency,
+  // generic.faq, generic.estimate) — but nothing ever read that
+  // declaration to actually create one. A phone-collected lead with no
+  // completed booking now shows up on the dashboard as unqualified/new,
+  // independent of whether the conversation is ever abandoned.
+  //
+  // Edge-triggered the same way bookingTriggered is (step 13 below):
+  // compare progress BEFORE this turn's memory update against AFTER, so
+  // this fires exactly once per session, on the turn phone is first
+  // collected — never on a later turn where the visitor merely restates
+  // it (phoneCollected can't revert to false once true, so the edge only
+  // exists once). widgetBook() finds this same lead later by
+  // conversationId and updates it with real booking details rather than
+  // creating a second one (see LeadService.findByConversationId there).
+  const wasPhoneCollected = memoryToRich(memory).progress.phoneCollected;
+  const isPhoneCollectedNow = richMemory.progress.phoneCollected;
+  const isLeadCaptureObjective = (objective: string | null): boolean =>
+    objective === 'collect_phone' || objective === 'handle_emergency';
+
+  if (!wasPhoneCollected && isPhoneCollectedNow && isLeadCaptureObjective(input.currentObjective ?? null)) {
+    LeadService.captureFromPhoneCollected(organizationId, conversationId, {
+      name:      updatedMemory.visitorName || 'Unknown Caller',
+      phone:     updatedMemory.phone ?? '',
+      email:     updatedMemory.email ?? undefined,
+      hvacNeed:  updatedMemory.servicesDiscussed[0] ?? updatedMemory.goals[0] ?? undefined,
+      emergency: richMemory.rich.emergency.value === true || input.currentObjective === 'handle_emergency',
+    }).catch(err => logger.warn(
+      { err, conversationId, organizationId },
+      '[Orchestrator] Failed to auto-capture lead on phoneCollected',
+    ));
+  }
+
   // ── 4. Tool selection + execution ────────────────────────────────────────
   const autoToolNames = selectAutoTools(userMessage, stage, intent.intent);
   for (const toolName of autoToolNames) {
