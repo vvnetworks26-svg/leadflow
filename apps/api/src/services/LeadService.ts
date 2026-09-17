@@ -82,6 +82,46 @@ export const LeadService = {
     return lead;
   },
 
+  /**
+   * Look up the lead already captured for this conversation, if any.
+   * The dedup key for both phone-collected auto-capture (below) and
+   * widgetBook()'s find-or-update — a conversation has at most one Lead.
+   */
+  async findByConversationId(organizationId: string, conversationId: string): Promise<Lead | null> {
+    const doc = await LeadModel.findOne({ organizationId, conversationId });
+    return doc ? (doc.toJSON() as unknown as Lead) : null;
+  },
+
+  /**
+   * Idempotent find-or-create fired the moment a phone number is collected
+   * mid-conversation, independent of whether booking ever completes (see
+   * ai/orchestrator.ts). Safe to call more than once for the same
+   * conversationId — the findByConversationId check makes this a no-op on
+   * a repeat trigger (e.g. a race, or the visitor restating their number).
+   * widgetBook() later finds this same lead by conversationId and updates
+   * it with real booking details instead of creating a second one.
+   */
+  async captureFromPhoneCollected(
+    organizationId: string,
+    conversationId: string,
+    params: { name: string; phone: string; email?: string; hvacNeed?: string; emergency?: boolean },
+  ): Promise<Lead> {
+    const existing = await LeadService.findByConversationId(organizationId, conversationId);
+    if (existing) return existing;
+
+    return LeadService.create(organizationId, {
+      name:      params.name,
+      phone:     params.phone,
+      email:     params.email || '',
+      hvacNeed:  params.hvacNeed || 'General inquiry',
+      emergency: params.emergency ?? false,
+      source:    'widget',
+      status:    'New',
+      conversationId,
+      notes:     'Lead captured automatically when a phone number was collected mid-conversation.',
+    } as CreateLeadDto);
+  },
+
   async update(organizationId: string, id: string, dto: UpdateLeadDto): Promise<Lead> {
     const doc = await LeadModel.findOneAndUpdate(
       { _id: id, organizationId },

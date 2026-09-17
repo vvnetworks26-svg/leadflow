@@ -21,7 +21,7 @@ import { ApiError }            from '../middleware/errorHandler';
 import { AvailabilityService, BookingRulesService, CalendarProviderRegistry } from '../booking-engine';
 import { localToUtcIso }       from '../booking-engine/TimezoneService';
 import type { BlockedSlot, AvailabilityRequest } from '../booking-engine/types';
-import { CreateLeadSchema }    from '../dto/lead.dto';
+import { CreateLeadSchema, UpdateLeadSchema } from '../dto/lead.dto';
 import { CreateConversationSchema } from '../dto/conversation.dto';
 import { runOrchestrator }     from '../ai/orchestrator';
 import { AIConversationSessionModel } from '../models/AIConversationSession.model';
@@ -37,7 +37,7 @@ import { enqueueConversationSummary } from '../ai/pipeline/ConversationSummaryQu
 import { logger }              from '../utils/logger';
 import { z }                   from 'zod';
 import type { ConversationStage, ConversationMemory } from '../ai/types';
-import type { AppointmentType }   from '../types';
+import type { AppointmentType, Lead } from '../types';
 import type { ConversationObjective, WorkflowState } from '../conversation-engine/types';
 import type { ToolCall, ToolSelectionContext } from '../tool-orchestration/types';
 import type { ResolvedIntent } from '../intent-engine/types';
@@ -894,25 +894,53 @@ export async function widgetBook(req: Request, res: Response, next: NextFunction
       }).catch(() => { /* best-effort */ });
     }
 
-    // ── 2. Create lead ───────────────────────────────────────────────────────
-    const leadDto = CreateLeadSchema.parse({
-      name:                customerName,
-      phone:               phone,
-      email:               d.email ?? '',
-      address:             d.address,
-      zipCode:             d.zipCode,
-      hvacNeed:            d.hvacNeed ?? d.service,
-      emergency:           d.emergency,
-      source:              'widget',
-      status:              d.status,
-      priority:            d.priority,
-      value:               d.value,
-      conversationId:      convId,
-      qualificationReason: d.qualificationReason,
-      preferredDay:        d.preferredDay,
-      notes:               d.notes ?? `Booked via widget chat. Service: ${d.service}.`,
-    });
-    const lead = await LeadService.create(orgId, leadDto);
+    // ── 2. Find-or-update-or-create the lead for this session ─────────────────
+    // A lead may already exist for this conversationId — the free-text chat
+    // flow auto-captures one the moment phoneCollected becomes true (see
+    // ai/orchestrator.ts step 3b), independent of whether booking ever
+    // completes. Update that same lead with real booking-time details
+    // instead of creating a duplicate; only create fresh if none exists yet
+    // (e.g. a blueprint without create_lead wired, or Layer 3 never engaged
+    // for this conversation at all).
+    const existingLead = await LeadService.findByConversationId(orgId, convId);
+
+    let lead: Lead;
+    if (existingLead) {
+      const updateDto = UpdateLeadSchema.parse({
+        name:                customerName,
+        email:               d.email || undefined,
+        address:             d.address,
+        zipCode:             d.zipCode,
+        hvacNeed:            d.hvacNeed ?? d.service,
+        emergency:           d.emergency,
+        status:              d.status,
+        priority:            d.priority,
+        value:               d.value,
+        qualificationReason: d.qualificationReason,
+        preferredDay:        d.preferredDay,
+        notes:               d.notes ?? `Booked via widget chat. Service: ${d.service}.`,
+      });
+      lead = await LeadService.update(orgId, existingLead.id, updateDto);
+    } else {
+      const leadDto = CreateLeadSchema.parse({
+        name:                customerName,
+        phone:               phone,
+        email:               d.email ?? '',
+        address:             d.address,
+        zipCode:             d.zipCode,
+        hvacNeed:            d.hvacNeed ?? d.service,
+        emergency:           d.emergency,
+        source:              'widget',
+        status:              d.status,
+        priority:            d.priority,
+        value:               d.value,
+        conversationId:      convId,
+        qualificationReason: d.qualificationReason,
+        preferredDay:        d.preferredDay,
+        notes:               d.notes ?? `Booked via widget chat. Service: ${d.service}.`,
+      });
+      lead = await LeadService.create(orgId, leadDto);
+    }
 
     // ── 3. Generate confirmation number ─────────────────────────────────────
     const confirmationNumber = `LF-${randomBytes(3).toString('hex').toUpperCase()}`;

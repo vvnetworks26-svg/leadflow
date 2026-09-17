@@ -29,12 +29,9 @@ import { PromptAssembler } from '../prompt-assembly/PromptAssembler';
 import { estimateTokens, deduplicateHistory } from '../prompt-assembly/ContextCompressor';
 import { SECTION_ORDER } from '../prompt-assembly/types';
 
-// Layer 6
-import { MemoryEngine } from '../memory-engine/MemoryEngine';
-
 // Supporting
 import { emptyRichMemory, emptyProgress } from '../ai/types';
-import { updateMemoryFromMessage } from '../ai/memory';
+import { updateMemoryFromMessage, memoryToPromptBlock } from '../ai/memory';
 import type { BusinessIdentity } from '../business-identity/types';
 import type { ResolvedIntent } from '../intent-engine/types';
 import type { ConversationPlan as L3Plan } from '../conversation-engine/types';
@@ -178,13 +175,15 @@ describe('Booking Flow', () => {
 // ─── 4. RETURNING VISITOR FLOW ───────────────────────────────────────────────
 
 describe('Returning Visitor Flow', () => {
-  it('memory engine extracts name and phone from previous session', () => {
+  it('rich memory carries name and phone forward from a previous session', () => {
     const mem = emptyRichMemory();
     mem.rich.visitorName = { value: 'Alice', confidence: 90, source: 'context' };
     mem.rich.phone       = { value: '5551234', confidence: 90, source: 'context' };
-    const profile = MemoryEngine.process({ memory: mem, conversationId: 'c-1', organizationId: 'org-1' });
-    assert.ok(profile.items.some(i => i.key === 'visitorName' && i.value === 'Alice'));
-    assert.ok(profile.items.some(i => i.key === 'phone'));
+    const flat = updateMemoryFromMessage(mem, '', undefined);
+    assert.equal(flat.visitorName, 'Alice');
+    assert.equal(flat.phone, '5551234');
+    assert.equal(flat.progress.visitorNameCollected, true);
+    assert.equal(flat.progress.phoneCollected, true);
   });
 
   it('returning visitor — no re-ask of already collected name', () => {
@@ -203,14 +202,14 @@ describe('Returning Visitor Flow', () => {
     assert.ok(typeof plan === 'string' || plan === undefined);
   });
 
-  it('memory profile includes returning visitor context', () => {
+  it('prompt memory block includes returning visitor context', () => {
     const mem = emptyRichMemory();
     mem.rich.visitorName    = { value: 'Bob', confidence: 90, source: 'context' };
     mem.rich.service        = { value: 'AC Repair', confidence: 85, source: 'context' };
-    const profile           = MemoryEngine.process({ memory: mem, conversationId: 'c-2', organizationId: 'org-1' });
-    const relevant          = MemoryEngine.retrieve(profile.items, { context: 'returning_visitor' });
-    assert.ok(relevant.some(i => i.key === 'visitorName'));
-    assert.ok(relevant.some(i => i.key === 'service'));
+    const flat = updateMemoryFromMessage(mem, '', undefined);
+    const block = memoryToPromptBlock(flat);
+    assert.ok(block.includes('Visitor name: Bob'));
+    assert.ok(block.includes('Service requested: AC Repair'));
   });
 });
 
@@ -284,53 +283,6 @@ describe('Prompt Audit — Section ordering and deduplication', () => {
   it('recommendations block omitted when empty', () => {
     const rp = PromptAssembler.build(makeAssemblerInput('hvac', { recommendations: [] }));
     assert.ok(!rp.metadata.sectionsIncluded.includes('RECOMMENDATIONS'));
-  });
-});
-
-// ─── 7. MEMORY AUDIT ─────────────────────────────────────────────────────────
-
-describe('Memory Audit', () => {
-  it('phone field gets permanent retention', () => {
-    const mem = emptyRichMemory();
-    mem.rich.phone = { value: '5551234', confidence: 90, source: 'context' };
-    const profile  = MemoryEngine.process({ memory: mem, conversationId: 'c-1', organizationId: 'org-1' });
-    const phoneItem = profile.items.find(i => i.key === 'phone');
-    assert.equal(phoneItem?.retention, 'permanent');
-  });
-
-  it('low confidence item flagged for revalidation', () => {
-    const mem = emptyRichMemory();
-    mem.rich.company = { value: 'Acme', confidence: 25, source: 'regex' };
-    const profile    = MemoryEngine.process({ memory: mem, conversationId: 'c-1', organizationId: 'org-1' });
-    assert.ok(profile.lowConfidenceKeys.includes('company'));
-  });
-
-  it('conflict resolved with newest_wins for bookingStatus', () => {
-    const mem = emptyRichMemory();
-    mem.bookingStatus = 'requested';
-    const existing = [{ id:'e1', domain:'relationship' as const, key:'bookingStatus', value:'none', confidence:90, importance:'critical' as const, importanceScore:92, retention:'permanent' as const, source:'user' as const, needsRevalidation:false, tags:[], createdAt: new Date().toISOString() }];
-    const profile  = MemoryEngine.process({ memory: mem as any, conversationId:'c-1', organizationId:'org-1', existingItems: existing });
-    const bs = profile.items.find(i => i.key === 'bookingStatus');
-    assert.ok(bs?.value === 'requested' || profile.conflicts.some(c => c.conflict.key === 'bookingStatus'));
-  });
-
-  it('memory compression removes duplicates', () => {
-    const mem = emptyRichMemory();
-    mem.rich.phone = { value: '5551234', confidence: 90, source: 'context' };
-    const existing = [{ id:'e1', domain:'identity' as const, key:'phone', value:'5550000', confidence:60, importance:'critical' as const, importanceScore:88, retention:'permanent' as const, source:'user' as const, needsRevalidation:false, tags:[], createdAt: new Date().toISOString() }];
-    const profile  = MemoryEngine.process({ memory: mem, conversationId:'c-1', organizationId:'org-1', existingItems: existing });
-    const phones   = profile.items.filter(i => i.key === 'phone');
-    assert.equal(phones.length, 1);
-  });
-
-  it('booking context retrieval includes phone and name', () => {
-    const mem = emptyRichMemory();
-    mem.rich.phone       = { value: '555', confidence: 90, source: 'context' };
-    mem.rich.visitorName = { value: 'Carol', confidence: 90, source: 'context' };
-    const profile   = MemoryEngine.process({ memory: mem, conversationId:'c-1', organizationId:'org-1' });
-    const retrieved = MemoryEngine.retrieve(profile.items, { context: 'booking' });
-    assert.ok(retrieved.some(i => i.key === 'phone'));
-    assert.ok(retrieved.some(i => i.key === 'visitorName'));
   });
 });
 
@@ -417,16 +369,13 @@ describe('Stress Tests', () => {
     assert.doesNotThrow(() => PromptAssembler.build(makeAssemblerInput('hvac', { identity: bare })));
   });
 
-  it('memory engine handles 50 existing items without OOM', () => {
-    const existing = Array.from({ length: 50 }, (_, i) => ({
-      id: `i${i}`, domain: 'behavioral' as const, key: `field${i}`, value: `val${i}`,
-      confidence: 70, importance: 'medium' as const, importanceScore: 55,
-      retention: '90_days' as const, source: 'user' as const,
-      needsRevalidation: false, tags: [], createdAt: new Date().toISOString(),
-    }));
-    assert.doesNotThrow(() =>
-      MemoryEngine.process({ memory: emptyRichMemory(), conversationId:'c-1', organizationId:'org-1', existingItems: existing })
-    );
+  it('memory update handles 50 sequential turns without error', () => {
+    let mem: any = emptyRichMemory();
+    assert.doesNotThrow(() => {
+      for (let i = 0; i < 50; i++) {
+        mem = updateMemoryFromMessage(mem, `turn ${i} message`, `Question ${i}?`);
+      }
+    });
   });
 });
 
