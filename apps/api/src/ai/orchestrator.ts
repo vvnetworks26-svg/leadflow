@@ -35,7 +35,6 @@ import { qualifyLead, shouldTriggerBooking }           from './qualification';
 import { generateRecommendations }                     from './recommendation';
 import { computeNextStage, STAGE_INSTRUCTIONS }        from './conversation-state';
 import { buildSystemPrompt, type OrgContext }          from './prompt-builder';
-import { buildFallbackReply }                          from './fallback-reply';
 import { searchKnowledge }                             from './knowledge';
 import { executeTool, selectAutoTools }                from './tools';
 import { checkInput, checkOutput, fallbackResponse }   from './guardrails';
@@ -47,6 +46,7 @@ import { planNextMove }                                from './conversation-plan
 import { OrganizationModel }                           from '../models/Organization.model';
 import { BusinessModel }                               from '../models/Business.model';
 import { BusinessIdentityService }                     from '../business-identity/BusinessIdentityService';
+import type { BusinessIdentity }                       from '../business-identity/types';
 import { ResponseEngine }                              from '../response-engine/ResponseEngine';
 import { PromptAssembler }                             from '../prompt-assembly/PromptAssembler';
 import { ConversationOrchestrationService }            from '../conversation-engine/ConversationOrchestrationService';
@@ -83,6 +83,26 @@ async function loadOrgContext(organizationId: string): Promise<OrgContext> {
     enableEmergencyWorkflow: b?.aiConfig?.enableEmergencyWorkflow ?? true,
     faqEntries:     b?.aiConfig?.faq ?? [],
   };
+}
+
+// ─── Gemini-unavailable message ────────────────────────────────────────────────
+
+/**
+ * Fixed, honest reply used whenever Gemini can't produce a real answer —
+ * failure, empty response, or not configured at all. Deliberately NOT
+ * stage/objective-dependent: replaces the old scripted, per-situation text
+ * (ai/fallback-reply.ts's buildFallbackReply()) that sometimes claimed things
+ * ("will follow up shortly", "your appointment is confirmed") that weren't
+ * true. This is a fixed template, not AI output — it never goes through
+ * checkOutput().
+ */
+function buildGeminiUnavailableMessage(identity: BusinessIdentity | null, org: OrgContext): string {
+  const businessName = identity?.companyProfile.businessName || org.name;
+  const phone         = identity?.contactInfo.phone || org.phone;
+
+  return phone
+    ? `We're sorry, we're having trouble connecting right now. Please call ${businessName} directly at ${phone} and our team will help you.`
+    : `We're sorry, we're having trouble connecting right now. Please reach out to ${businessName} directly and our team will help you.`;
 }
 
 // ─── Turn counter helper ──────────────────────────────────────────────────────
@@ -316,6 +336,7 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
 
   // ── 10. Gemini call ──────────────────────────────────────────────────────
   let reply: string;
+  let isGeminiUnavailable = false;
 
   if (isGeminiConfigured()) {
     const geminiResp = await sendToGemini({
@@ -329,21 +350,29 @@ export async function runOrchestrator(input: OrchestratorInput): Promise<Orchest
     if (geminiResp.success && geminiResp.text) {
       reply = geminiResp.text;
     } else {
-      logger.warn({ error: geminiResp.error }, '[Orchestrator] Gemini failed, using fallback');
-      reply = buildFallbackReply(l3Plan?.stageId ?? null, updatedMemory, orgContext, plan);
+      logger.warn({ error: geminiResp.error }, '[Orchestrator] Gemini failed, using honest static message');
+      reply = buildGeminiUnavailableMessage(identity, orgContext);
+      isGeminiUnavailable = true;
     }
   } else {
-    // No API key — use rule-based fallback (dev/test mode)
-    reply = buildFallbackReply(l3Plan?.stageId ?? null, updatedMemory, orgContext, plan);
+    // No API key — same honest static message (dev/test mode)
+    reply = buildGeminiUnavailableMessage(identity, orgContext);
+    isGeminiUnavailable = true;
   }
 
   // ── 11. Guardrail: output check ──────────────────────────────────────────
-  const outputGuard = checkOutput(reply, updatedMemory.bookingStatus);
-  reply = outputGuard.sanitized;
-  if (!outputGuard.safe) {
-    analyticsEvents.push(makeEvent('guardrail_blocked', organizationId, conversationId, {
-      reason: outputGuard.reason, direction: 'output',
-    }));
+  // Skipped for the static message above: it's a fixed, human-authored
+  // template with no AI-generated content, so it's safe by construction —
+  // running it through the hallucination/claim-sanitizing guardrail below
+  // would be inert at best and is unnecessary work at worst.
+  if (!isGeminiUnavailable) {
+    const outputGuard = checkOutput(reply, updatedMemory.bookingStatus);
+    reply = outputGuard.sanitized;
+    if (!outputGuard.safe) {
+      analyticsEvents.push(makeEvent('guardrail_blocked', organizationId, conversationId, {
+        reason: outputGuard.reason, direction: 'output',
+      }));
+    }
   }
 
   // ── 12. Memory: update from AI reply (track services mentioned) ──────────
